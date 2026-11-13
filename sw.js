@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chessduck-web-v1.6.0-1';
+const CACHE_NAME = 'chessduck-web-v1.6.0-2';
 
 const PRECACHE_ASSETS = [
   './',
@@ -24,6 +24,8 @@ const PRECACHE_ASSETS = [
   './assets/apple-touch-icon.png',
   './assets/icon-192.png',
   './assets/icon-512.png',
+  './assets/icon-192-maskable.png',
+  './assets/icon-512-maskable.png',
   './assets/mascot.png',
   './assets/wood_move.wav',
   './assets/fonts/fredoka.ttf',
