@@ -210,6 +210,7 @@ test('fiftyOfficialThemes', () => {
   assert.deepEqual(THEME_CATEGORIES.map((c) => c.label), THEME_GROUPS);
   assert.equal(THEME_CATEGORIES[0].label, 'Mats');
   assert.equal(THEME_CATEGORIES.at(-1).label, 'Autres gains, par phase de jeu');
+  assert.ok(THEME_CATEGORIES.every((c) => c.emoji === '📁'));
   assert.equal(themeFilterSet(''), null);
   assert.deepEqual([...themeFilterSet('fork')], ['fork']);
   assert.equal(themeFilterSet('group:mate').size, ALL_THEMES.filter((t) => t.group === G_MATE).length);

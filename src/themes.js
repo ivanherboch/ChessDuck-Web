@@ -89,12 +89,12 @@ export function primaryTheme(themesStr) {
 export const THEME_GROUPS = [G_MATE, G_TACTIC, G_ATTACK, G_SPECIAL, G_ENDGAME, G_PHASE];
 
 export const THEME_CATEGORIES = [
-  { key: 'group:mate', group: G_MATE, label: G_MATE, emoji: '👑', goal: 'Tous les types de mats (mats nommés et mats en N coups).' },
-  { key: 'group:tactic', group: G_TACTIC, label: G_TACTIC, emoji: '⚡', goal: 'Fourchettes, clouages, enfilades, déviations, sacrifices…' },
-  { key: 'group:attack', group: G_ATTACK, label: G_ATTACK, emoji: '⚔️', goal: 'Attaques sur le roque, roi exposé, f2/f7 et pions avancés.' },
-  { key: 'group:special', group: G_SPECIAL, label: G_SPECIAL, emoji: '✨', goal: 'Promotions, sous-promotions, prises en passant et roques.' },
-  { key: 'group:endgame', group: G_ENDGAME, label: G_ENDGAME, emoji: '♟️', goal: 'Finales thématiques de pions, tours, fous, cavaliers et dames.' },
-  { key: 'group:phase', group: G_PHASE, label: G_PHASE, emoji: '🧭', goal: 'Gains positionnels ou matériels en ouverture, milieu ou finale.' },
+  { key: 'group:mate', group: G_MATE, label: G_MATE, emoji: '📁', goal: 'Tous les types de mats (mats nommés et mats en N coups).' },
+  { key: 'group:tactic', group: G_TACTIC, label: G_TACTIC, emoji: '📁', goal: 'Fourchettes, clouages, enfilades, déviations, sacrifices…' },
+  { key: 'group:attack', group: G_ATTACK, label: G_ATTACK, emoji: '📁', goal: 'Attaques sur le roque, roi exposé, f2/f7 et pions avancés.' },
+  { key: 'group:special', group: G_SPECIAL, label: G_SPECIAL, emoji: '📁', goal: 'Promotions, sous-promotions, prises en passant et roques.' },
+  { key: 'group:endgame', group: G_ENDGAME, label: G_ENDGAME, emoji: '📁', goal: 'Finales thématiques de pions, tours, fous, cavaliers et dames.' },
+  { key: 'group:phase', group: G_PHASE, label: G_PHASE, emoji: '📁', goal: 'Gains positionnels ou matériels en ouverture, milieu ou finale.' },
 ];
 
 export const CATEGORY_BY_KEY = Object.fromEntries(THEME_CATEGORIES.map((c) => [c.key, c]));
