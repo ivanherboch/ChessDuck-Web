@@ -2,7 +2,7 @@
 // Port fidèle de Puzzles.kt (ChessDuck v1.6.0)
 
 import { Line, PAWN, PIECE_NAMES_FR, pieceType } from '../chess.js';
-import { BANDS, THEME_GROUPS, ALL_THEMES, bandOf, frNum, primaryTheme, THEME_BY_KEY } from '../themes.js';
+import { BANDS, THEME_CATEGORIES, THEME_GROUPS, ALL_THEMES, bandOf, frNum, primaryTheme, THEME_BY_KEY } from '../themes.js';
 import { COLORS, ChessBoardView, captureBadge, moveAnim, undoAnim } from '../board.js';
 import { isMateScore, mateIn } from '../review-comments.js';
 import { renderProblemCard, renderSolutionCard, shareOrSaveCanvas } from '../share-card.js';
@@ -591,6 +591,9 @@ export class PuzzlesModule {
           };
 
           addRow('🎯 Tous les thèmes', 'Un mélange de toutes les idées tactiques.', '');
+          for (const cat of THEME_CATEGORIES) {
+            addRow(`${cat.emoji} ${cat.label}`, cat.goal, cat.key);
+          }
           for (const g of THEME_GROUPS) {
             themesWrap.appendChild(makeSectionTitle(g.toUpperCase()));
             for (const t of ALL_THEMES.filter((x) => x.group === g)) {
@@ -623,7 +626,7 @@ export class PuzzlesModule {
           notFoundEl,
           makeSectionTitle('1. DIFFICULTÉ'),
           bandRow,
-          makeSectionTitle('2. THÈME — 50 thèmes officiels Lichess'),
+          makeSectionTitle('2. CATÉGORIE OU THÈME'),
           indexStatus,
           themesWrap,
         );

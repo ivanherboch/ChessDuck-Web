@@ -7,7 +7,7 @@ import {
   GameEnd, Line, Move, Position, START_FEN, materialOf,
 } from '../src/chess.js';
 import {
-  ALL_THEMES, G_MATE, THEME_GROUPS, primaryTheme,
+  ALL_THEMES, G_MATE, G_PHASE, THEME_BY_KEY, THEME_CATEGORIES, THEME_GROUPS, primaryTheme, themeFilterSet,
 } from '../src/themes.js';
 import {
   GameLogic, MATE, ReviewComments, decodeAnalysis, encodeAnalysis,
@@ -206,6 +206,14 @@ test('fiftyOfficialThemes', () => {
   assert.equal(primaryTheme(' rookEndgame endgame ').key, 'rookEndgame');
   assert.equal(primaryTheme(' advantage endgame short ').key, 'endgame');
   assert.equal(THEME_GROUPS[0], G_MATE);
+  assert.equal(THEME_GROUPS.at(-1), G_PHASE);
+  assert.deepEqual(THEME_CATEGORIES.map((c) => c.label), THEME_GROUPS);
+  assert.equal(THEME_CATEGORIES[0].label, 'Mats');
+  assert.equal(THEME_CATEGORIES.at(-1).label, 'Autres gains, par phase de jeu');
+  assert.equal(themeFilterSet(''), null);
+  assert.deepEqual([...themeFilterSet('fork')], ['fork']);
+  assert.equal(themeFilterSet('group:mate').size, ALL_THEMES.filter((t) => t.group === G_MATE).length);
+  assert.ok(themeFilterSet('group:mate').has('smotheredMate') && themeFilterSet('group:mate').has('mateIn2'));
 });
 
 test('all50000PuzzlesAreLegalAndIndexed', () => {
@@ -234,24 +242,39 @@ test('all50000PuzzlesAreLegalAndIndexed', () => {
   assert.ok(first && first.id === '0000D');
   assert.equal(first.primary, 'endgame');
 
-  // Reclassification exclusive : la somme des 50 thèmes vaut exactement le total (50 000) et par difficulté
+  // Reclassification exclusive : la somme des 50 thèmes (et des 6 catégories) vaut exactement le total (50 000) et par difficulté
   for (let b = 0; b <= 4; b++) {
     const counts = catalog.countsForBand(b);
     const sumTotals = ALL_THEMES.reduce((acc, t) => acc + counts.get(t.key).total, 0);
     const sumSolved = ALL_THEMES.reduce((acc, t) => acc + counts.get(t.key).solved, 0);
+    const catTotals = THEME_CATEGORIES.reduce((acc, c) => acc + counts.get(c.key).total, 0);
+    const catSolved = THEME_CATEGORIES.reduce((acc, c) => acc + counts.get(c.key).solved, 0);
     assert.equal(sumTotals, counts.get('').total);
     assert.equal(sumSolved, counts.get('').solved);
+    assert.equal(catTotals, counts.get('').total);
+    assert.equal(catSolved, counts.get('').solved);
   }
   const countsAll = catalog.countsForBand(0);
   assert.equal(countsAll.get('').total, 50000);
   assert.equal(countsAll.get('').solved, 2);
   assert.equal(countsAll.get('endgame').solved, 1);
   assert.equal(countsAll.get('arabianMate').solved, 1);
+  assert.equal(countsAll.get('group:mate').solved, 1);
+  assert.equal(countsAll.get('group:phase').solved, 1);
   assert.ok(ALL_THEMES.every((t) => countsAll.get(t.key).total > 0));
+  assert.ok(THEME_CATEGORIES.every((c) => countsAll.get(c.key).total > 0));
 
   for (const tk of ['fork', 'middlegame', 'mateIn2', 'sacrifice', 'rookEndgame']) {
     const picked = catalog.random(0, tk, '');
     assert.ok(picked && picked.primary === tk && primaryTheme(picked.themes).key === tk, `random(${tk})`);
+  }
+
+  for (const cat of THEME_CATEGORIES) {
+    for (let k = 0; k < 15; k++) {
+      const picked = catalog.random(0, cat.key, '');
+      assert.ok(picked && THEME_BY_KEY[picked.primary].group === cat.group, `random(${cat.key})`);
+    }
+    assert.ok(catalog.random(1, cat.key, ''), `band 1 has ${cat.key}`);
   }
 
   const search = catalog.search('0d1z');

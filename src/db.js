@@ -1,6 +1,6 @@
 // Stockage local (Préférences, Progression, Historique des parties) & Catalogue de 50 000 problèmes Lichess
 
-import { ALL_THEMES, bandRange, primaryTheme } from './themes.js';
+import { ALL_THEMES, THEME_CATEGORIES, bandRange, primaryTheme, themeFilterSet } from './themes.js';
 
 const SETTINGS_KEY = 'chessduck_settings_v1';
 const DB_NAME = 'chessduck_db';
@@ -401,13 +401,14 @@ export class PuzzleCatalog {
   random(band, theme, excludeId) {
     const [lo, hi] = bandRange(band);
     const solved = this.userDb.solvedIds;
+    const allowedSet = themeFilterSet(theme);
     const unsolvedCands = [];
     const anyCands = [];
     for (let i = 0; i < this.puzzles.length; i++) {
       const p = this.puzzles[i];
       if (p.id === excludeId) continue;
       if (p.rating < lo || p.rating > hi) continue;
-      if (theme && p.primary !== theme) continue;
+      if (allowedSet && !allowedSet.has(p.primary)) continue;
       anyCands.push(p);
       if (!solved.has(p.id)) unsolvedCands.push(p);
     }
@@ -476,6 +477,19 @@ export class PuzzleCatalog {
     }
     const map = new Map();
     ALL_THEMES.forEach((t, i) => map.set(t.key, { total: totals[i], solved: dones[i] }));
+    for (const cat of THEME_CATEGORIES) {
+      let total = 0;
+      let done = 0;
+      for (const t of ALL_THEMES) {
+        if (t.group !== cat.group) continue;
+        const c = map.get(t.key);
+        if (c) {
+          total += c.total;
+          done += c.solved;
+        }
+      }
+      map.set(cat.key, { total, solved: done });
+    }
     map.set('', { total: totals[n], solved: dones[n] });
     return map;
   }
