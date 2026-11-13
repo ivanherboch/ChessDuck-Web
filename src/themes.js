@@ -67,6 +67,8 @@ export const ALL_THEMES = [
 
 export const THEME_BY_KEY = Object.fromEntries(ALL_THEMES.map((t) => [t.key, t]));
 
+// Règle de classement (du plus précis au plus général — premier thème présent) :
+// 1. Mat nommé · 2. Mat en N · 3. Coup spécial / motif rare · 4. Motif tactique courant · 5. Attaque du roi, puis type de finale · 6. Phase de jeu
 const PRIORITY = [
   'smotheredMate', 'anastasiaMate', 'arabianMate', 'bodenMate', 'doubleBishopMate', 'dovetailMate', 'hookMate', 'backRankMate',
   'mateIn1', 'mateIn2', 'mateIn3', 'mateIn4', 'mateIn5',

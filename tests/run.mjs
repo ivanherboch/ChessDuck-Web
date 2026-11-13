@@ -195,16 +195,23 @@ test('fiftyOfficialThemes', () => {
   assert.equal(ALL_THEMES.length, 50);
   assert.equal(new Set(ALL_THEMES.map((t) => t.key)).size, 50);
   assert.ok(ALL_THEMES.every((t) => t.tip.length > 30));
-  assert.equal(primaryTheme(' crushing fork middlegame short ').key, 'fork');
+  // 1. Mat nommé > 2. Mat en N > 3. Coup spécial / motif rare > 4. Motif tactique courant > 5. Attaque du roi > Type de finale > 6. Phase de jeu
   assert.equal(primaryTheme(' mate mateIn2 smotheredMate middlegame ').key, 'smotheredMate');
   assert.equal(primaryTheme(' attraction mate mateIn2 middlegame short ').key, 'mateIn2');
+  assert.equal(primaryTheme(' fork underPromotion endgame ').key, 'underPromotion');
+  assert.equal(primaryTheme(' enPassant pin middlegame ').key, 'enPassant');
+  assert.equal(primaryTheme(' crushing fork middlegame short ').key, 'fork');
+  assert.equal(primaryTheme(' kingsideAttack exposedKing middlegame ').key, 'exposedKing');
+  assert.equal(primaryTheme(' kingsideAttack rookEndgame endgame ').key, 'kingsideAttack');
+  assert.equal(primaryTheme(' rookEndgame endgame ').key, 'rookEndgame');
+  assert.equal(primaryTheme(' advantage endgame short ').key, 'endgame');
   assert.equal(THEME_GROUPS[0], G_MATE);
 });
 
 test('all50000PuzzlesAreLegalAndIndexed', () => {
   const hot = fs.readFileSync(path.join(ROOT, 'assets/data/puzzles_hot.tsv'), 'utf8');
   const rest = fs.readFileSync(path.join(ROOT, 'assets/data/puzzles_rest.tsv'), 'utf8');
-  const mockDb = { solvedIds: new Set() };
+  const mockDb = { solvedIds: new Set(['0000D', '00dt1']) };
   const catalog = new PuzzleCatalog(mockDb);
   catalog._ingestTsv(hot);
   assert.ok(catalog.puzzles.length > 1400, `hot=${catalog.puzzles.length}`);
@@ -225,8 +232,28 @@ test('all50000PuzzlesAreLegalAndIndexed', () => {
   assert.ok(byId && byId.id === '0D1Z6');
   const first = catalog.byIdIgnoreCase('0000d');
   assert.ok(first && first.id === '0000D');
-  const counts = catalog.countsForBand(0);
-  assert.equal(counts.get('').total, 50000);
+  assert.equal(first.primary, 'endgame');
+
+  // Reclassification exclusive : la somme des 50 thèmes vaut exactement le total (50 000) et par difficulté
+  for (let b = 0; b <= 4; b++) {
+    const counts = catalog.countsForBand(b);
+    const sumTotals = ALL_THEMES.reduce((acc, t) => acc + counts.get(t.key).total, 0);
+    const sumSolved = ALL_THEMES.reduce((acc, t) => acc + counts.get(t.key).solved, 0);
+    assert.equal(sumTotals, counts.get('').total);
+    assert.equal(sumSolved, counts.get('').solved);
+  }
+  const countsAll = catalog.countsForBand(0);
+  assert.equal(countsAll.get('').total, 50000);
+  assert.equal(countsAll.get('').solved, 2);
+  assert.equal(countsAll.get('endgame').solved, 1);
+  assert.equal(countsAll.get('arabianMate').solved, 1);
+  assert.ok(ALL_THEMES.every((t) => countsAll.get(t.key).total > 0));
+
+  for (const tk of ['fork', 'middlegame', 'mateIn2', 'sacrifice', 'rookEndgame']) {
+    const picked = catalog.random(0, tk, '');
+    assert.ok(picked && picked.primary === tk && primaryTheme(picked.themes).key === tk, `random(${tk})`);
+  }
+
   const search = catalog.search('0d1z');
   assert.ok(search.items.some((it) => it.id === '0D1Z6'));
 });

@@ -351,7 +351,9 @@ export class PuzzlesModule {
   }
 
   _solvedMessage(p) {
-    const names = p.themes.trim().split(/\s+/).map((k) => THEME_BY_KEY[k]?.name).filter(Boolean).slice(0, 4);
+    const prim = primaryTheme(p.themes);
+    const others = p.themes.trim().split(/\s+/).map((k) => THEME_BY_KEY[k]).filter((t) => t && t.key !== prim.key).map((t) => t.name);
+    const names = [prim.name, ...new Set(others)].slice(0, 4);
     return `✅ Problème résolu ! ${names.length > 0 ? `Thèmes : ${names.join(', ')}. ` : ''}Touchez 🎲 Aléatoire pour le suivant.`;
   }
 

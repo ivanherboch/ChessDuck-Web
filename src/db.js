@@ -302,9 +302,8 @@ export class PuzzleCatalog {
     this.metaIds = [];
     this.metaIdsLower = [];
     this.metaRatings = [];
-    // Split 50 themes into two 32-bit bitmasks (JS bitwise ops are 32-bit!)
-    this.metaMaskLo = [];
-    this.metaMaskHi = [];
+    // Thème le plus caractéristique (0..49) de chaque problème selon primaryTheme()
+    this.metaPrimaryIdx = [];
     this.metaThemes = [];
     this.fullLoaded = false;
     this._hotPromise = null;
@@ -373,7 +372,8 @@ export class PuzzleCatalog {
       const rating = Number.parseInt(parts[3], 10);
       const themesRaw = parts[4];
       const themes = ` ${themesRaw.trim()} `;
-      const p = { id, fen, moves, rating, themes };
+      const primary = primaryTheme(themesRaw).key;
+      const p = { id, fen, moves, rating, themes, primary };
       this.puzzles.push(p);
       this.byIdMap.set(id, p);
       this.byIdLowerMap.set(id.toLowerCase(), p);
@@ -382,17 +382,7 @@ export class PuzzleCatalog {
       this.metaIdsLower.push(id.toLowerCase());
       this.metaRatings.push(rating);
       this.metaThemes.push(themes);
-      let lo = 0;
-      let hi = 0;
-      for (const tok of themesRaw.split(' ')) {
-        const ti = this.themeIdxMap.get(tok);
-        if (ti !== undefined) {
-          if (ti < 30) lo |= (1 << ti);
-          else hi |= (1 << (ti - 30));
-        }
-      }
-      this.metaMaskLo.push(lo);
-      this.metaMaskHi.push(hi);
+      this.metaPrimaryIdx.push(this.themeIdxMap.get(primary) ?? -1);
     }
   }
 
@@ -410,7 +400,6 @@ export class PuzzleCatalog {
 
   random(band, theme, excludeId) {
     const [lo, hi] = bandRange(band);
-    const themeNeedle = theme ? ` ${theme} ` : '';
     const solved = this.userDb.solvedIds;
     const unsolvedCands = [];
     const anyCands = [];
@@ -418,7 +407,7 @@ export class PuzzleCatalog {
       const p = this.puzzles[i];
       if (p.id === excludeId) continue;
       if (p.rating < lo || p.rating > hi) continue;
-      if (themeNeedle && !p.themes.includes(themeNeedle)) continue;
+      if (theme && p.primary !== theme) continue;
       anyCands.push(p);
       if (!solved.has(p.id)) unsolvedCands.push(p);
     }
@@ -479,19 +468,10 @@ export class PuzzleCatalog {
       const isSolved = solved.has(this.metaIds[i]);
       totals[n]++;
       if (isSolved) dones[n]++;
-      let mLo = this.metaMaskLo[i];
-      while (mLo !== 0) {
-        const b = Math.clz32(mLo & -mLo) ^ 31; // trailing zeros
-        totals[b]++;
-        if (isSolved) dones[b]++;
-        mLo &= mLo - 1;
-      }
-      let mHi = this.metaMaskHi[i];
-      while (mHi !== 0) {
-        const b = 30 + (Math.clz32(mHi & -mHi) ^ 31);
-        totals[b]++;
-        if (isSolved) dones[b]++;
-        mHi &= mHi - 1;
+      const ti = this.metaPrimaryIdx[i];
+      if (ti >= 0) {
+        totals[ti]++;
+        if (isSolved) dones[ti]++;
       }
     }
     const map = new Map();
