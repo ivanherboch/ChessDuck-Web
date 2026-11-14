@@ -1,29 +1,40 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="night">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>ChessDuck — Apprendre les échecs, Notation, Problèmes &amp; Jeu</title>
-  <meta name="description" content="Application web d'échecs en français adaptée de ChessNote v1.6.0 : notation FIDE, 113 leçons interactives, 75 000 problèmes Lichess avec réfutation Stockfish, jeu libre et mode enfant.">
-  <meta name="theme-color" content="#0F172A">
-
-  <!-- Intégration Safari iPhone / iPad (PWA « Sur l'écran d'accueil ») -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="ChessDuck">
-  <meta name="format-detection" content="telephone=no">
-
-  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="preload" href="css/app.css" as="style">
-  <link rel="stylesheet" href="css/app.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="description" content="ChessDuck — Notation FIDE, Académie en 113 leçons, 150 000 problèmes Lichess, Jeu Libre avec Stockfish 19 Lite WASM et Mode Enfant, 100 % hors-ligne.">
+    <meta name="theme-color" content="#0F172A">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ChessDuck">
+    <title>ChessDuck</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/png" href="./assets/icons/favicon.png">
+    <link rel="apple-touch-icon" href="./assets/icons/apple-touch-icon.png">
+    <script>
+        (function () {
+            try {
+                var raw = localStorage.getItem('chessduck_v2_settings');
+                var st = raw ? JSON.parse(raw) : {};
+                var kid = Boolean(st.kidMode);
+                var tm = typeof st.themeMode === 'number' ? st.themeMode : 2;
+                var dark = !kid && (tm === 2 || (tm === 0 && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
+                var bg = kid ? '#EBF6FF' : (dark ? '#0F172A' : '#F8FAFC');
+                var fg = kid ? '#1F3B57' : (dark ? '#F8FAFC' : '#0F172A');
+                var root = document.documentElement;
+                root.dataset.theme = kid ? 'kid' : (dark ? 'night' : 'day');
+                root.style.setProperty('--bg', bg);
+                root.style.setProperty('--text', fg);
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (meta) meta.setAttribute('content', bg);
+            } catch (e) {}
+        })();
+    </script>
+    <link rel="stylesheet" href="./css/styles.css">
 </head>
-<body class="theme-night">
-  <div id="app">
-    <noscript>Activez JavaScript pour utiliser ChessDuck.</noscript>
-  </div>
-  <script type="module" src="src/app.js"></script>
+<body>
+    <div id="app"></div>
+    <script type="module" src="./src/app.js"></script>
 </body>
 </html>
