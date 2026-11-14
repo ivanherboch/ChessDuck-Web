@@ -786,6 +786,7 @@ export class PlayFeature {
             );
         }
         this.liveLayout.relayout();
+        this.liveBoard._syncCanvasSize();
     }
 
     // ---- DOM & Actions ReviewLayout ----
@@ -1167,5 +1168,6 @@ export class PlayFeature {
             duckButton({ label: 'Fin', icon: 'SkipNext', enabled: cur < line.size, className: 'flex-1', onClick: () => this.lastReview() }),
         );
         this.reviewLayout.relayout();
+        this.revBoard._syncCanvasSize();
     }
 }

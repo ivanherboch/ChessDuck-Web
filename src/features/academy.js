@@ -479,6 +479,7 @@ export class AcademyFeature {
             this.actionRow.replaceChildren(bReset, bRight);
         }
 
+        this.layout.relayout();
         this._renderBoard();
     }
 }

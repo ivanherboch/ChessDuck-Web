@@ -457,6 +457,7 @@ export class KidFeature {
             });
         this.navRow.replaceChildren(backBtn, fwdBtn, mainBtn);
         this.layout.relayout();
+        this.board._syncCanvasSize();
     }
 
     // ---- Leçon animée d'une pièce ----

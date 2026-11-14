@@ -165,6 +165,7 @@ export class FeedbackCardView {
         this._currentTitle = null;
         this._currentText = '';
         this._fitRaf = 0;
+        this.el._fitText = () => this.fitText();
         this._ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this._scheduleFit()) : null;
         this._ro?.observe(this.el);
     }
@@ -432,11 +433,11 @@ export function createSheet(title, onCloseCallback = null) {
 
 /**
  * Gabarit responsive 1:1 avec ModuleLayout de ChessNote :
- * en portrait, échiquier carré adaptatif sans jamais masquer les commandes ;
+ * en portrait, échiquier carré adaptatif maximisé selon la hauteur réelle du contenu du bas ;
  * en paysage tablette/bureau (w > h * 1.15), échiquier à gauche et panneau de commandes à droite.
  */
 export class ModuleLayoutView {
-    constructor({ bottomMin = 210, adaptive = true } = {}) {
+    constructor({ bottomMin = 170, adaptive = true } = {}) {
         this.bottomMin = bottomMin;
         this.adaptive = adaptive;
         this.el = el('div', 'module-layout');
@@ -451,15 +452,17 @@ export class ModuleLayoutView {
         this.panelPane.append(this.topSlot, this.bottomSlot);
         this.el.append(this.boardPane, this.panelPane);
 
-        this._reserve = 0;
         this._evalPad = 0;
+        this._destroyed = false;
         this._ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.relayout()) : null;
         this._ro?.observe(this.el);
         this._onWindowResize = () => this.relayout();
         window.addEventListener('resize', this._onWindowResize);
+        document.fonts?.ready?.then(() => { if (!this._destroyed) this.relayout(); });
     }
 
     destroy() {
+        this._destroyed = true;
         this._ro?.disconnect();
         window.removeEventListener('resize', this._onWindowResize);
     }
@@ -470,8 +473,91 @@ export class ModuleLayoutView {
     }
 
     resetReserve() {
-        this._reserve = 0;
         this.relayout();
+    }
+
+    _measureChildHeight(child) {
+        if (!child || child.classList.contains('hidden')) return 0;
+        const cs = getComputedStyle(child);
+        if (cs.display === 'none') return 0;
+
+        if (child.classList.contains('feedback-card')) {
+            const row = child.querySelector('.feedback-row');
+            const textEl = child.querySelector('.feedback-text');
+            const actionEl = child.querySelector('.feedback-action');
+            const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+                + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+            const minH = parseFloat(cs.minHeight) || 0;
+            let rowH = row ? row.scrollHeight : 0;
+            if (row && textEl) {
+                const prevFs = textEl.style.fontSize;
+                const prevFlex = row.style.flex;
+                const prevOverflow = row.style.overflow;
+                textEl.style.fontSize = '14px';
+                row.style.flex = '0 0 auto';
+                row.style.overflow = 'visible';
+                rowH = Math.ceil(row.scrollHeight);
+                textEl.style.fontSize = prevFs;
+                row.style.flex = prevFlex;
+                row.style.overflow = prevOverflow;
+            }
+            const actionH = (actionEl && !actionEl.classList.contains('hidden')) ? actionEl.offsetHeight : 0;
+            return Math.max(minH, Math.ceil(padY + rowH + actionH));
+        }
+
+        if (child.classList.contains('rev-move-table')) {
+            return 92;
+        }
+
+        if (child.classList.contains('kid-demo-bottom') || child.classList.contains('kid-bottom-col')) {
+            const subPad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+                + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+            const subGap = parseFloat(cs.rowGap || cs.gap) || 0;
+            let sum = subPad;
+            let vis = 0;
+            for (const sub of child.children) {
+                const h = this._measureChildHeight(sub);
+                if (h > 0) {
+                    if (vis > 0) sum += subGap;
+                    sum += h;
+                    vis += 1;
+                }
+            }
+            return Math.ceil(sum);
+        }
+
+        if (child.classList.contains('kid-demo-card')) {
+            const subPad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+                + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+            const txt = child.querySelector('.kid-demo-text');
+            return Math.ceil(subPad + (txt ? txt.scrollHeight : child.scrollHeight));
+        }
+
+        return Math.max(child.offsetHeight, child.scrollHeight);
+    }
+
+    _measureBottomNeeded() {
+        const cs = getComputedStyle(this.bottomSlot);
+        const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+        const gap = parseFloat(cs.rowGap || cs.gap) || 0;
+        let sum = padY;
+        let vis = 0;
+        for (const child of this.bottomSlot.children) {
+            const ch = this._measureChildHeight(child);
+            if (ch > 0) {
+                if (vis > 0) sum += gap;
+                sum += ch;
+                vis += 1;
+            }
+        }
+        return vis > 0 ? Math.ceil(sum) : 0;
+    }
+
+    _refitFeedbackCards() {
+        for (const child of this.bottomSlot.children) {
+            if (child._fitText) child._fitText();
+            else child.querySelector('.feedback-card')?._fitText?.();
+        }
     }
 
     relayout() {
@@ -499,6 +585,7 @@ export class ModuleLayoutView {
             this.underSlot.style.width = `${side}px`;
             this.overSlot.style.marginLeft = `${this._evalPad}px`;
             this.underSlot.style.marginLeft = `${this._evalPad}px`;
+            this._refitFeedbackCards();
             return;
         }
 
@@ -510,18 +597,13 @@ export class ModuleLayoutView {
         const topH = this.topSlot.offsetHeight || 0;
         const overH = this.overSlot.offsetHeight || 0;
         const underH = this.underSlot.offsetHeight || 0;
-        const availW = Math.max(160, w - 12);
-        const baseSide = Math.max(
-            160,
-            Math.min(availW - this._evalPad, h - topH - overH - underH - this.bottomMin),
+        const availW = Math.max(150, w - 12);
+        const measuredBottom = this._measureBottomNeeded();
+        const effectiveBottom = measuredBottom > 0 ? measuredBottom : this.bottomMin;
+        const side = Math.max(
+            150,
+            Math.min(availW - this._evalPad, h - topH - overH - underH - effectiveBottom),
         );
-        if (this.adaptive) {
-            const availBottom = h - topH - overH - underH - baseSide;
-            const needed = this.bottomSlot.scrollHeight || 0;
-            const want = Math.max(0, Math.min(Math.floor(baseSide * 0.22), needed - availBottom));
-            if (want > this._reserve) this._reserve = want;
-        }
-        const side = Math.max(160, baseSide - (this.adaptive ? this._reserve : 0));
         this.boardPane.style.width = '';
         this.boardPane.style.alignItems = 'center';
         this.boardHost.style.width = `${side + this._evalPad}px`;
@@ -531,5 +613,6 @@ export class ModuleLayoutView {
         this.underSlot.style.width = hasPills ? `${Math.min(availW, Math.max(side, 290))}px` : `${side}px`;
         this.overSlot.style.marginLeft = `${this._evalPad}px`;
         this.underSlot.style.marginLeft = hasPills ? '0px' : `${this._evalPad}px`;
+        this._refitFeedbackCards();
     }
 }

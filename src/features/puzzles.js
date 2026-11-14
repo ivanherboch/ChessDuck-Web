@@ -623,7 +623,7 @@ export class PuzzlesFeature {
             this.navRow.classList.remove('hidden');
 
             const showTip = visible && !s.refute && !s.solved && s.tone === Tone.INFO;
-            const text = s.message + (showTip ? `\n\nConseil : ${type.tip}` : '');
+            const text = s.message + (showTip ? `\nConseil : ${type.tip}` : '');
             const title = visible ? `Type de problème : ${type.name}` : 'Thème masqué (mode libre)';
             const actionEl = !visible
                 ? duckButton({
@@ -680,6 +680,7 @@ export class PuzzlesFeature {
             this.navRow.replaceChildren(backBtn, midBtn, fwdBtn);
         }
 
+        this.layout.relayout();
         this._renderBoard();
     }
 }

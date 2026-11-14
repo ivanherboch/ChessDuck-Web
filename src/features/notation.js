@@ -528,6 +528,7 @@ export class NotationFeature {
         const keysEnabled = !s.solved;
         for (const btn of this.keyButtons) btn.disabled = !keysEnabled;
 
+        this.layout.relayout();
         this._renderBoard();
     }
 }
