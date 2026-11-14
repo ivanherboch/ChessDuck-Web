@@ -187,7 +187,7 @@ export function openSettingsSheet() {
         'muted-small',
         'ChessDuck fonctionne 100 % hors-ligne. Moteur : Stockfish 19 Lite WASM (GPLv3). Problèmes : base ouverte Lichess (CC0). Pièces : série classique de Cburnett et pièce féerique Girafe, Wikimedia Commons (CC BY-SA 3.0). Icônes : Material Icons (Apache 2.0). Police du mode enfant : Fredoka (OFL).',
     );
-    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.2.1');
+    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.2.5');
     b.append(aboutText, copyright);
 
     function sync(st) {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chessduck-v2.2.1-2';
+const CACHE_NAME = 'chessduck-v2.2.5-1';
 
 const PRECACHE_URLS = [
     './',
@@ -83,7 +83,7 @@ function isHeavyStaticAsset(pathname) {
 self.addEventListener('install', (event) => {
     event.waitUntil((async () => {
         const cache = await caches.open(CACHE_NAME);
-        await cache.addAll(PRECACHE_URLS);
+        await Promise.all(PRECACHE_URLS.map((u) => cache.add(new Request(u, { cache: 'reload' }))));
         await self.skipWaiting();
     })());
 });
