@@ -10,6 +10,7 @@ import { KidModule } from './features/kid.js';
 import { NotationModule, openMemoSheet } from './features/notation.js';
 import { PlayModule } from './features/play.js';
 import { PuzzlesModule } from './features/puzzles.js';
+import { PUZZLE_TOTAL, frNum } from './themes.js';
 import { el, makeButton, makeChip, makeSectionTitle, sheets } from './ui.js';
 
 const TABS = [
@@ -286,7 +287,7 @@ class ChessDuckApp {
           `Votre classement actuel : ${st.elo} ELO (formule FIDE, K = 32). Les parties à 2 joueurs ne comptent pas.`);
 
         const aboutText = el('div', { className: 'settings-muted' },
-          'ChessDuck fonctionne 100 % hors-ligne après installation. Moteur : Stockfish 19 WASM (GPLv3). Base : ChessNote v1.6.0 · 50 000 problèmes Lichess (CC0). Pièces : série classique de Cburnett et pièce féerique Girafe, Wikimedia Commons (CC BY-SA 3.0). Police du mode enfant : Fredoka (OFL).');
+          `ChessDuck fonctionne 100 % hors-ligne après installation. Moteur : Stockfish 19 WASM (GPLv3). Base : ChessNote v1.6.0 · ${frNum(PUZZLE_TOTAL)} problèmes Lichess (CC0). Pièces : série classique de Cburnett et pièce féerique Girafe, Wikimedia Commons (CC BY-SA 3.0). Police du mode enfant : Fredoka (OFL).`);
 
         const footer = el('div', { className: 'settings-footer' }, '© Ivan Herboch, 2026 · v1.6.0-web');
 

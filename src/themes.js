@@ -127,6 +127,8 @@ export function bandOf(rating) {
   return 4;
 }
 
+export const PUZZLE_TOTAL = 75000;
+
 export function frNum(n) {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }

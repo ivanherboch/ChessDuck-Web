@@ -1,6 +1,6 @@
-// Stockage local (Préférences, Progression, Historique des parties) & Catalogue de 50 000 problèmes Lichess
+// Stockage local (Préférences, Progression, Historique des parties) & Catalogue de 75 000 problèmes Lichess
 
-import { ALL_THEMES, THEME_CATEGORIES, bandRange, primaryTheme, themeFilterSet } from './themes.js';
+import { ALL_THEMES, PUZZLE_TOTAL, THEME_CATEGORIES, bandRange, primaryTheme, themeFilterSet } from './themes.js';
 
 const SETTINGS_KEY = 'chessduck_settings_v1';
 const DB_NAME = 'chessduck_db';
@@ -290,6 +290,21 @@ export class UserDatabase {
       }
     });
   }
+
+  async deleteCachedText(key) {
+    const db = await this._dbPromise;
+    if (!db) return;
+    await new Promise((res) => {
+      try {
+        const tx = db.transaction('cache', 'readwrite');
+        tx.objectStore('cache').delete(key);
+        tx.oncomplete = res;
+        tx.onerror = res;
+      } catch {
+        res();
+      }
+    });
+  }
 }
 
 export class PuzzleCatalog {
@@ -321,7 +336,7 @@ export class PuzzleCatalog {
   }
 
   get totalCount() {
-    return 50000;
+    return PUZZLE_TOTAL;
   }
 
   get loadedCount() {
@@ -335,7 +350,7 @@ export class PuzzleCatalog {
       const txt = await resp.text();
       this._ingestTsv(txt);
       this._notify();
-      // Start loading full 50k in background right after hot set is ready
+      // Start loading full catalog in background right after hot set is ready
       this.loadFull();
     })();
     return this._hotPromise;
@@ -344,12 +359,13 @@ export class PuzzleCatalog {
   loadFull() {
     if (this._fullPromise) return this._fullPromise;
     this._fullPromise = (async () => {
-      let txt = await this.userDb.getCachedText('puzzles_rest_v1');
+      let txt = await this.userDb.getCachedText('puzzles_rest_v2');
       if (!txt) {
         const resp = await fetch('assets/data/puzzles_rest.tsv');
         txt = await resp.text();
         // Cache asynchronously in IndexedDB for instant offline startup next time
-        this.userDb.setCachedText('puzzles_rest_v1', txt).catch(() => {});
+        this.userDb.setCachedText('puzzles_rest_v2', txt).catch(() => {});
+        this.userDb.deleteCachedText('puzzles_rest_v1').catch(() => {});
       }
       this._ingestTsv(txt);
       this.fullLoaded = true;

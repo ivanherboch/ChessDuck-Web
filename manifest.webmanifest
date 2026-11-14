@@ -1,7 +1,7 @@
 {
   "name": "ChessDuck",
   "short_name": "ChessDuck",
-  "description": "Apprendre les échecs en français : notation anglaise FIDE, 113 leçons, 50 000 problèmes Lichess et jeu contre Stockfish.",
+  "description": "Apprendre les échecs en français : notation anglaise FIDE, 113 leçons, 75 000 problèmes Lichess et jeu contre Stockfish.",
   "lang": "fr",
   "start_url": "./",
   "scope": "./",

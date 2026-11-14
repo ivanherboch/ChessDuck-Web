@@ -7,7 +7,7 @@ import {
   GameEnd, Line, Move, Position, START_FEN, materialOf,
 } from '../src/chess.js';
 import {
-  ALL_THEMES, G_MATE, G_PHASE, THEME_BY_KEY, THEME_CATEGORIES, THEME_GROUPS, primaryTheme, themeFilterSet,
+  ALL_THEMES, G_MATE, G_PHASE, PUZZLE_TOTAL, THEME_BY_KEY, THEME_CATEGORIES, THEME_GROUPS, bandOf, primaryTheme, themeFilterSet,
 } from '../src/themes.js';
 import {
   GameLogic, MATE, ReviewComments, decodeAnalysis, encodeAnalysis,
@@ -217,15 +217,22 @@ test('fiftyOfficialThemes', () => {
   assert.ok(themeFilterSet('group:mate').has('smotheredMate') && themeFilterSet('group:mate').has('mateIn2'));
 });
 
-test('all50000PuzzlesAreLegalAndIndexed', () => {
+test('all75000PuzzlesAreLegalAndIndexed', () => {
   const hot = fs.readFileSync(path.join(ROOT, 'assets/data/puzzles_hot.tsv'), 'utf8');
   const rest = fs.readFileSync(path.join(ROOT, 'assets/data/puzzles_rest.tsv'), 'utf8');
+  const rawIds = [
+    ...hot.trim().split('\n').map((l) => l.split('\t')[0]),
+    ...rest.trim().split('\n').map((l) => l.split('\t')[0]),
+  ];
+  assert.equal(rawIds.length, PUZZLE_TOTAL);
+  assert.equal(new Set(rawIds).size, PUZZLE_TOTAL, 'Duplicate puzzle IDs found');
+
   const mockDb = { solvedIds: new Set(['0000D', '00dt1']) };
   const catalog = new PuzzleCatalog(mockDb);
   catalog._ingestTsv(hot);
   assert.ok(catalog.puzzles.length > 1400, `hot=${catalog.puzzles.length}`);
   catalog._ingestTsv(rest);
-  assert.equal(catalog.puzzles.length, 50000);
+  assert.equal(catalog.puzzles.length, PUZZLE_TOTAL);
 
   for (const pz of catalog.puzzles) {
     const line = new Line(pz.fen);
@@ -243,7 +250,7 @@ test('all50000PuzzlesAreLegalAndIndexed', () => {
   assert.ok(first && first.id === '0000D');
   assert.equal(first.primary, 'endgame');
 
-  // Reclassification exclusive : la somme des 50 thèmes (et des 6 catégories) vaut exactement le total (50 000) et par difficulté
+  // Reclassification exclusive : la somme des 50 thèmes (et des 6 catégories) vaut exactement le total (75 000) et par difficulté
   for (let b = 0; b <= 4; b++) {
     const counts = catalog.countsForBand(b);
     const sumTotals = ALL_THEMES.reduce((acc, t) => acc + counts.get(t.key).total, 0);
@@ -256,7 +263,7 @@ test('all50000PuzzlesAreLegalAndIndexed', () => {
     assert.equal(catSolved, counts.get('').solved);
   }
   const countsAll = catalog.countsForBand(0);
-  assert.equal(countsAll.get('').total, 50000);
+  assert.equal(countsAll.get('').total, PUZZLE_TOTAL);
   assert.equal(countsAll.get('').solved, 2);
   assert.equal(countsAll.get('endgame').solved, 1);
   assert.equal(countsAll.get('arabianMate').solved, 1);
@@ -264,6 +271,23 @@ test('all50000PuzzlesAreLegalAndIndexed', () => {
   assert.equal(countsAll.get('group:phase').solved, 1);
   assert.ok(ALL_THEMES.every((t) => countsAll.get(t.key).total > 0));
   assert.ok(THEME_CATEGORIES.every((c) => countsAll.get(c.key).total > 0));
+
+  // Chaque cellule (thème × difficulté) est non vide, et toutes celles qui disposent >= 150 cas dans Lichess atteignent >= 150
+  const capped = new Set([
+    'anastasiaMate:4', 'bodenMate:4', 'castling:1', 'castling:2',
+    'doubleBishopMate:3', 'doubleBishopMate:4', 'enPassant:1',
+    'smotheredMate:4', 'underPromotion:1', 'underPromotion:2',
+  ]);
+  for (let b = 1; b <= 4; b++) {
+    const c = catalog.countsForBand(b);
+    for (const t of ALL_THEMES) {
+      const cnt = c.get(t.key).total;
+      assert.ok(cnt > 0, `Empty cell ${t.key}:${b}`);
+      if (!capped.has(`${t.key}:${b}`)) {
+        assert.ok(cnt >= 150, `Deficient cell ${t.key}:${b} has ${cnt} < 150`);
+      }
+    }
+  }
 
   for (const tk of ['fork', 'middlegame', 'mateIn2', 'sacrifice', 'rookEndgame']) {
     const picked = catalog.random(0, tk, '');

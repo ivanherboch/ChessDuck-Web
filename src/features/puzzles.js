@@ -1,8 +1,8 @@
-// Module Problèmes : 50 000 problèmes Lichess, réfutation temps réel via Stockfish, catalogue 50 thèmes & export image PNG
+// Module Problèmes : 75 000 problèmes Lichess, réfutation temps réel via Stockfish, catalogue 50 thèmes & export image PNG
 // Port fidèle de Puzzles.kt (ChessDuck v1.6.0)
 
 import { Line, PAWN, PIECE_NAMES_FR, pieceType } from '../chess.js';
-import { BANDS, THEME_CATEGORIES, THEME_GROUPS, ALL_THEMES, bandOf, frNum, primaryTheme, THEME_BY_KEY } from '../themes.js';
+import { BANDS, PUZZLE_TOTAL, THEME_CATEGORIES, THEME_GROUPS, ALL_THEMES, bandOf, frNum, primaryTheme, THEME_BY_KEY } from '../themes.js';
 import { COLORS, ChessBoardView, captureBadge, moveAnim, undoAnim } from '../board.js';
 import { isMateScore, mateIn } from '../review-comments.js';
 import { renderProblemCard, renderSolutionCard, shareOrSaveCanvas } from '../share-card.js';
@@ -84,7 +84,7 @@ export class PuzzlesModule {
     this.root = this.layout.root;
 
     this.catalogBtn = makeButton({
-      label: '🧩 0 / 50 000 ▾',
+      label: `🧩 0 / ${frNum(PUZZLE_TOTAL)} ▾`,
       accent: 'blue',
       weight: 1.36,
       height: 38,
@@ -222,7 +222,7 @@ export class PuzzlesModule {
     if (p) {
       this._show(p);
     } else if (!this.catalog.fullLoaded && this.catalog.puzzles.length > 0) {
-      this.state.message = 'Chargement du catalogue complet (50 000 problèmes)…';
+      this.state.message = `Chargement du catalogue complet (${frNum(PUZZLE_TOTAL)} problèmes)…`;
       this.state.tone = Tone.INFO;
       this.render();
       this.catalog.loadFull().then(() => {
@@ -504,7 +504,7 @@ export class PuzzlesModule {
             modal.close();
           } else {
             notFound = true;
-            notFoundEl.textContent = `Aucun problème « ${query.trim()} » parmi les 50 000 embarqués. Vérifiez l'identifiant (majuscules et minuscules comptent).`;
+            notFoundEl.textContent = `Aucun problème « ${query.trim()} » parmi les ${frNum(PUZZLE_TOTAL)} embarqués. Vérifiez l'identifiant (majuscules et minuscules comptent).`;
             notFoundEl.classList.remove('hidden');
           }
         };
@@ -563,7 +563,7 @@ export class PuzzlesModule {
           const counts = this.catalog.countsForBand(band);
           indexStatus.textContent = this.catalog.fullLoaded
             ? ''
-            : `Indexation hors-ligne en cours (${frNum(this.catalog.loadedCount)} / 50 000 problèmes chargés)…`;
+            : `Indexation hors-ligne en cours (${frNum(this.catalog.loadedCount)} / ${frNum(PUZZLE_TOTAL)} problèmes chargés)…`;
           indexStatus.classList.toggle('hidden', this.catalog.fullLoaded);
 
           themesWrap.innerHTML = '';
@@ -745,7 +745,7 @@ export class PuzzlesModule {
     const recIds = (this.prefs.get().recentPuzzles || []).slice(1, 6);
     const recItems = this.catalog.byIds(recIds);
 
-    this.catalogBtn.setConfig({ label: `🧩 ${frNum(solvedCount)} / 50 000 ▾` });
+    this.catalogBtn.setConfig({ label: `🧩 ${frNum(solvedCount)} / ${frNum(PUZZLE_TOTAL)} ▾` });
     this.randomBtn.setConfig({ filled: s.solved || s.empty });
     this.recentsBtn.setConfig({ enabled: recItems.length > 0 });
     this.exportBtn.setConfig({ enabled: !!(p && line) });
