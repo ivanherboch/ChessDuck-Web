@@ -125,19 +125,24 @@ export function applyThemeToDom(c) {
     root.setProperty('--green', c.green);
     root.setProperty('--blue', c.blue);
     root.setProperty('--red', c.red);
+    const tonalAlpha = c.dark ? 0.16 : 0.14;
     root.setProperty('--gold-text', c.goldRole.text);
     root.setProperty('--gold-fill', c.goldRole.fill);
     root.setProperty('--gold-onfill', c.goldRole.onFill);
+    root.setProperty('--gold-tonal', hexToRgba(c.goldRole.fill, tonalAlpha));
     root.setProperty('--green-text', c.greenRole.text);
     root.setProperty('--green-fill', c.greenRole.fill);
     root.setProperty('--green-onfill', c.greenRole.onFill);
+    root.setProperty('--green-tonal', hexToRgba(c.greenRole.fill, tonalAlpha));
     root.setProperty('--blue-text', c.blueRole.text);
     root.setProperty('--blue-fill', c.blueRole.fill);
     root.setProperty('--blue-onfill', c.blueRole.onFill);
+    root.setProperty('--blue-tonal', hexToRgba(c.blueRole.fill, tonalAlpha));
     root.setProperty('--red-text', c.redRole.text);
     root.setProperty('--red-fill', c.redRole.fill);
     root.setProperty('--red-onfill', c.redRole.onFill);
-    root.setProperty('--tonal-alpha', c.dark ? '0.16' : '0.14');
+    root.setProperty('--red-tonal', hexToRgba(c.redRole.fill, tonalAlpha));
+    root.setProperty('--tonal-alpha', String(tonalAlpha));
     root.setProperty('--square-light', c.squareLight);
     root.setProperty('--square-dark', c.squareDark);
 

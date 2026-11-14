@@ -1,4 +1,4 @@
-/* ChessDuck v2.2.1 — Ardoise & Or + Mode Enfant (Fredoka) */
+/* ChessDuck v2.2.6 — Ardoise & Or + Mode Enfant (Fredoka) */
 
 @font-face {
     font-family: 'Fredoka';
@@ -504,7 +504,6 @@ input[type="search"] {
     cursor: default;
     background: var(--surface-subtle) !important;
     color: var(--muted) !important;
-    opacity: 0.72;
 }
 
 .duck-btn-primary {
@@ -590,7 +589,6 @@ input[type="search"] {
 .duck-icon-btn:disabled .duck-icon-btn-inner {
     background: transparent;
     color: var(--muted);
-    opacity: 0.55;
 }
 
 .duck-icon-badge {
@@ -689,23 +687,62 @@ input[type="search"] {
 .info-pill {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     padding: 4px 10px;
-    border-radius: 999px;
+    border-radius: 14px;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
     white-space: nowrap;
     flex-shrink: 1;
     min-width: 0;
-    background: var(--surface);
-    color: var(--muted);
-    --ac-text: var(--muted);
-    --ac-tonal: var(--surface);
-}
-
-.info-pill[class*="accent-"] {
+    --ac-text: var(--text);
+    --ac-tonal: var(--surface-hi);
     background: var(--ac-tonal);
     color: var(--ac-text);
+}
+
+.accent-gold,
+.duck-btn.accent-gold,
+.duck-icon-btn.accent-gold,
+.duck-chip.accent-gold,
+.info-pill.accent-gold {
+    --ac-text: var(--gold-text);
+    --ac-fill: var(--gold-fill);
+    --ac-onfill: var(--gold-onfill);
+    --ac-tonal: var(--gold-tonal);
+}
+
+.accent-green,
+.duck-btn.accent-green,
+.duck-icon-btn.accent-green,
+.duck-chip.accent-green,
+.info-pill.accent-green {
+    --ac-text: var(--green-text);
+    --ac-fill: var(--green-fill);
+    --ac-onfill: var(--green-onfill);
+    --ac-tonal: var(--green-tonal);
+}
+
+.accent-blue,
+.duck-btn.accent-blue,
+.duck-icon-btn.accent-blue,
+.duck-chip.accent-blue,
+.info-pill.accent-blue {
+    --ac-text: var(--blue-text);
+    --ac-fill: var(--blue-fill);
+    --ac-onfill: var(--blue-onfill);
+    --ac-tonal: var(--blue-tonal);
+}
+
+.accent-red,
+.duck-btn.accent-red,
+.duck-icon-btn.accent-red,
+.duck-chip.accent-red,
+.info-pill.accent-red {
+    --ac-text: var(--red-text);
+    --ac-fill: var(--red-fill);
+    --ac-onfill: var(--red-onfill);
+    --ac-tonal: var(--red-tonal);
 }
 
 /* ---- Dropdown Menu ---- */
@@ -1435,7 +1472,7 @@ button.move-strip-item {
     height: 44px;
     border-radius: 12px;
     background: var(--surface);
-    border: 1.5px solid var(--outline);
+    border: 1px solid var(--outline-strong);
     padding-right: 10px;
     display: flex;
     align-items: center;
@@ -1482,7 +1519,7 @@ button.move-strip-item {
     flex: 0 0 44px;
     border-radius: 12px;
     border: none;
-    background: var(--surface);
+    background: var(--surface-hi);
     color: var(--text);
     display: flex;
     align-items: center;
@@ -1491,7 +1528,8 @@ button.move-strip-item {
 }
 
 .notation-bs-btn:disabled {
-    opacity: 0.45;
+    background: var(--surface-subtle);
+    color: var(--muted);
     cursor: default;
 }
 
@@ -1517,9 +1555,9 @@ button.move-strip-item {
 .fide-key {
     min-width: 0;
     height: 36px;
-    border-radius: 9px;
-    border: 1px solid var(--outline);
-    background: var(--surface);
+    border-radius: 10px;
+    border: none;
+    background: var(--surface-hi);
     color: var(--text);
     padding: 2px;
     display: flex;
@@ -1531,12 +1569,13 @@ button.move-strip-item {
 }
 
 .fide-key:not(:disabled):active {
-    background: var(--surface-hi);
     transform: translateY(1px);
+    opacity: 0.88;
 }
 
 .fide-key:disabled {
-    opacity: 0.55;
+    background: var(--surface-subtle);
+    color: var(--muted);
     cursor: default;
 }
 
@@ -1546,23 +1585,28 @@ button.move-strip-item {
 
 .fide-key-main {
     font-size: 15px;
-    font-weight: 700;
+    font-weight: 600;
+    color: inherit;
 }
 
 .fide-key.is-piece .fide-key-main {
     font-size: 16px;
+}
+
+.fide-key.is-piece:not(:disabled) .fide-key-main {
     color: var(--gold-text);
 }
 
 .fide-key-sub {
     font-size: 9px;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--muted);
 }
 
 .fide-key-sub2 {
     font-size: 9px;
-    color: var(--muted);
+    font-weight: 500;
+    color: inherit;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1655,7 +1699,7 @@ button.move-strip-item {
 
 .academy-mastered-count {
     font-size: 12px;
-    color: var(--muted);
+    color: var(--gold-text);
     font-weight: 600;
 }
 
@@ -1824,8 +1868,8 @@ button.move-strip-item {
 }
 
 .search-hl {
-    background: var(--gold-tonal);
-    color: var(--gold-text);
+    background: var(--gold-fill);
+    color: var(--gold-onfill);
     border-radius: 3px;
     padding: 0 1px;
 }
@@ -1833,7 +1877,7 @@ button.move-strip-item {
 .sugg-type {
     flex: 1 1 0;
     font-size: 13px;
-    color: var(--muted);
+    color: var(--blue-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1963,7 +2007,7 @@ button.move-strip-item {
 .recent-status {
     font-size: 12px;
     font-weight: 600;
-    color: var(--muted);
+    color: var(--gold-text);
 }
 
 .recent-status.is-done {
@@ -2154,30 +2198,48 @@ button.move-strip-item {
     transition: width 160ms linear;
 }
 
+.review-aligned-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
 .review-side-row {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: 6px;
+    gap: 8px;
+}
+
+.review-aligned-rows.is-one-line .review-side-name {
+    flex: 0 0 var(--label-col-w, auto);
+    width: var(--label-col-w, auto);
+}
+
+.review-aligned-rows.is-stacked .review-side-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
 }
 
 .review-side-name {
     font-size: 13px;
     font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
 }
 
 .review-side-counts {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .review-note-item {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
+    white-space: nowrap;
 }
 
 .review-note-chip {
@@ -2191,7 +2253,7 @@ button.move-strip-item {
 .review-note-num {
     font-size: 12px;
     font-weight: 600;
-    color: var(--muted);
+    color: var(--text);
 }
 
 .review-missed-mate {

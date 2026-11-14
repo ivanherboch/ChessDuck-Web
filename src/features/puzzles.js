@@ -175,14 +175,17 @@ export class PuzzlesFeature {
     _openRecentSheet() {
         const sheet = createSheet('Derniers problèmes joués');
         const b = sheet.body;
+        const knownThemes = prefs.current.knownThemePuzzles || [];
         for (const r of this.recents) {
             const done = this.solvedIds.has(r.id);
+            // Thème visible si le problème est résolu, ou s'il était déjà affiché quand il a été joué.
+            const themeShown = done || knownThemes.includes(r.id);
             const row = document.createElement('button');
             row.type = 'button';
             row.className = 'recent-puzzle-row';
             const left = el('div', 'recent-puzzle-left');
             left.append(
-                el('div', 'recent-puzzle-title', `#${r.id} · ${done ? PuzzleThemes.primary(r.themes).name : 'thème masqué'}`),
+                el('div', 'recent-puzzle-title', `#${r.id} · ${themeShown ? PuzzleThemes.primary(r.themes).name : 'thème masqué'}`),
                 el('div', 'recent-puzzle-sub', `${PuzzleThemes.BANDS[PuzzleThemes.bandOf(r.rating)]} · ${r.rating}`),
             );
             const right = el('div', 'recent-puzzle-right');
@@ -240,13 +243,15 @@ export class PuzzlesFeature {
             hintStage: 0,
             refute: null,
             empty: false,
-            themeRevealed: false,
+            themeRevealed: Boolean(prefs.current.knownThemePuzzles?.includes(p.id)),
             message: `${this._turnLabel(white)} : trouvez la meilleure suite.`,
             tone: Tone.INFO,
             refuteUntil: 0,
             refuteHold: 0,
         });
         prefs.pushRecentPuzzle(p.id);
+        // Thème déjà affiché (filtre sur un thème précis) : il le restera dans la liste des récents.
+        if (this.themeVisible) prefs.markThemeKnown(p.id);
         this._ensureVisible();
         this._render();
 
@@ -310,6 +315,7 @@ export class PuzzlesFeature {
 
     revealTheme() {
         this.state.themeRevealed = true;
+        if (this.state.puzzle?.id) prefs.markThemeKnown(this.state.puzzle.id);
         this._render();
     }
 

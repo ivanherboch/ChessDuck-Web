@@ -1021,6 +1021,9 @@ export class PlayFeature {
             this.revSummaryEl.appendChild(prog);
         }
 
+        const alignedWrap = el('div', 'review-aligned-rows');
+        const labelEls = [];
+        const countEls = [];
         for (const white of [true, false]) {
             const v = ReviewComments.voice(g, white);
             const idxs = [];
@@ -1036,7 +1039,8 @@ export class PlayFeature {
                 'aria-label',
                 v.label + ' : ' + NOTES.map((n) => `${counts[n]} ${NOTE_NAMES[n]}`).join(', ') + `, ${missed} mat manqué`,
             );
-            row.appendChild(el('span', 'review-side-name', v.label));
+            const nameEl = el('span', 'review-side-name', v.label);
+            row.appendChild(nameEl);
             const badgesWrap = el('div', 'review-side-counts');
             for (const n of NOTES) {
                 const item = el('span', 'review-note-item');
@@ -1049,12 +1053,39 @@ export class PlayFeature {
                 badgesWrap.appendChild(el('span', 'review-missed-mate', `${missed} mat${missed > 1 ? 's' : ''} manqué${missed > 1 ? 's' : ''}`));
             }
             row.appendChild(badgesWrap);
-            this.revSummaryEl.appendChild(row);
+            alignedWrap.appendChild(row);
+            labelEls.push(nameEl);
+            countEls.push(badgesWrap);
         }
+        this.revSummaryEl.appendChild(alignedWrap);
 
-        this.revSummaryEl.appendChild(
-            el('div', 'review-summary-hint', 'Touchez Lecture ou un coup de la liste pour lire les commentaires.'),
-        );
+        const hintEl = el('div', 'review-summary-hint', 'Touchez Lecture ou un coup pour lire les commentaires.');
+        this.revSummaryEl.appendChild(hintEl);
+
+        const fitAligned = () => {
+            if (!this.revSummaryEl.isConnected) return;
+            const cs = getComputedStyle(this.revSummaryEl);
+            const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+            const availW = (this.revSummaryEl.clientWidth || 0) - padX;
+            if (availW <= 0) return;
+            alignedWrap.classList.remove('is-stacked', 'is-one-line');
+            alignedWrap.style.removeProperty('--label-col-w');
+            let maxLabelW = 0;
+            let maxCountsW = 0;
+            for (let i = 0; i < labelEls.length; i++) {
+                maxLabelW = Math.max(maxLabelW, Math.ceil(labelEls[i].scrollWidth));
+                maxCountsW = Math.max(maxCountsW, Math.ceil(countEls[i].scrollWidth));
+            }
+            const colW = maxLabelW + 10;
+            if (colW + maxCountsW <= availW) {
+                alignedWrap.classList.add('is-one-line');
+                alignedWrap.style.setProperty('--label-col-w', `${maxLabelW}px`);
+            } else {
+                alignedWrap.classList.add('is-stacked');
+            }
+        };
+        fitAligned();
+        requestAnimationFrame(fitAligned);
     }
 
     _renderMoveTable(line, cur, notes) {

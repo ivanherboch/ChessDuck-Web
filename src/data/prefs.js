@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     sound: true,
     kidMode: false,
     recentPuzzles: [],
+    knownThemePuzzles: [],
     pseudo: 'Joueur',
     pseudo2: 'Joueur 2',
     elo: 1200,
@@ -34,6 +35,7 @@ function loadInitial() {
             ...DEFAULT_SETTINGS,
             ...parsed,
             recentPuzzles: Array.isArray(parsed.recentPuzzles) ? parsed.recentPuzzles : [],
+            knownThemePuzzles: Array.isArray(parsed.knownThemePuzzles) ? parsed.knownThemePuzzles : [],
         };
     } catch {
         return { ...DEFAULT_SETTINGS };
@@ -78,7 +80,18 @@ class PrefsStore {
     pushRecentPuzzle(id) {
         if (!id) return;
         const old = this._value.recentPuzzles.filter((x) => x && x !== id);
-        this._update({ recentPuzzles: [id, ...old].slice(0, 6), puzzleId: id });
+        const recent = [id, ...old].slice(0, 6);
+        // Les thèmes « connus » ne concernent que les problèmes encore dans l'historique.
+        const known = (this._value.knownThemePuzzles || []).filter((x) => x && recent.includes(x));
+        this._update({ recentPuzzles: recent, puzzleId: id, knownThemePuzzles: known });
+    }
+
+    markThemeKnown(id) {
+        if (!id) return;
+        const cur = this._value.knownThemePuzzles || [];
+        if (!cur.includes(id)) {
+            this._update({ knownThemePuzzles: [...cur, id] });
+        }
     }
 
     setPseudo(v) { this._update({ pseudo: v }); }

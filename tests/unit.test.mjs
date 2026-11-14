@@ -387,3 +387,39 @@ test('ShareCard & BoardGeometry & LinePlaybackController', () => {
     const animBack = LinePlaybackController.transition(l, 1, 0);
     assert.equal(animBack.slides[0].from, l.moves[0].to);
 });
+
+test('Prefs: recentPuzzles and knownThemePuzzles tracking & pruning', async () => {
+    const { prefs } = await import('../src/data/prefs.js');
+    prefs._update({ recentPuzzles: [], knownThemePuzzles: [] });
+
+    // Simulate opening puzzle p1 with category "Mat en 1" selected (themeVisible = true)
+    prefs.pushRecentPuzzle('p1');
+    prefs.markThemeKnown('p1');
+    assert.deepEqual(prefs.current.recentPuzzles, ['p1']);
+    assert.deepEqual(prefs.current.knownThemePuzzles, ['p1']);
+
+    // Simulate clicking Random dice while still in "Mat en 1" -> p2 opened, p1 skipped
+    prefs.pushRecentPuzzle('p2');
+    prefs.markThemeKnown('p2');
+    assert.deepEqual(prefs.current.recentPuzzles, ['p2', 'p1']);
+    assert.ok(prefs.current.knownThemePuzzles.includes('p1'), 'Skipped puzzle p1 must keep known theme');
+    assert.ok(prefs.current.knownThemePuzzles.includes('p2'));
+
+    // Simulate switching to "Tous les problèmes" -> p3 opened without known theme
+    prefs.pushRecentPuzzle('p3');
+    assert.equal(prefs.current.knownThemePuzzles.includes('p3'), false);
+
+    // Reveal theme on p3
+    prefs.markThemeKnown('p3');
+    assert.equal(prefs.current.knownThemePuzzles.includes('p3'), true);
+
+    // Push 5 more puzzles so p1 drops out of the 6-item recentPuzzles list
+    for (const id of ['p4', 'p5', 'p6', 'p7', 'p8']) {
+        prefs.pushRecentPuzzle(id);
+    }
+    assert.equal(prefs.current.recentPuzzles.length, 6);
+    assert.equal(prefs.current.recentPuzzles.includes('p1'), false);
+    assert.equal(prefs.current.knownThemePuzzles.includes('p1'), false, 'knownThemePuzzles must prune IDs no longer in recentPuzzles');
+    assert.equal(prefs.current.knownThemePuzzles.includes('p3'), true);
+});
+
