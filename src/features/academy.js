@@ -5,7 +5,7 @@ import { prefs } from '../data/prefs.js';
 import { ChessBoardView } from '../ui/board.js';
 import {
     FeedbackCardView, ModuleLayoutView, MoveStripView, Tone,
-    duckButton, duckIconButton, duckSegmentedRow, el, infoPill, loadingState, updateSegmentedRow,
+    duckButton, duckIconButton, duckSegmentedRow, el, infoPill, loadingState, stepTitle, updateSegmentedRow,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
@@ -14,10 +14,6 @@ import { narrator } from '../ui/narrator.js';
 import { openLessonCatalog } from './lesson-catalog.js';
 
 export const POST_SPEECH_PAUSE_MS = 850;
-
-export function moveLabel(fullmove, white, san) {
-    return white ? `${fullmove}. ${san}` : `${fullmove}… ${san}`;
-}
 
 export function academyStepDelayMs(lesson, cursor, { narrationActive = false, speechResult = null } = {}) {
     const c = Math.max(0, Math.min(lesson?.line?.size ?? 0, cursor || 0));
@@ -65,6 +61,7 @@ export class AcademyFeature {
         this._destroyed = false;
         this._voiceAvailable = narrator.available;
         this._lastNarration = prefs.current.narration;
+        this._spokenHere = false;
 
         this._unsubLessons = db.subscribeMasteredLessons((set) => {
             if (this._destroyed) return;
@@ -153,11 +150,12 @@ export class AcademyFeature {
         const c = Math.max(0, Math.min(l.line.size, this.state.cursor));
         return c === 0
             ? SpokenFr.text(`${l.title}. ${l.summary}`)
-            : `${SpokenFr.move(l.line.sans[c - 1])}. ${SpokenFr.text(l.texts[c - 1])}`;
+            : SpokenFr.text(`${SpokenFr.move(l.line.sans[c - 1])}. ${l.texts[c - 1]}`);
     }
 
     narrate() {
         if (prefs.current.narration && this._voiceAvailable !== false && !this.state.challenge) {
+            this._spokenHere = true;
             narrator.speak(this.spokenStep());
         }
     }
@@ -165,7 +163,10 @@ export class AcademyFeature {
     toggleSpeech() {
         if (this._voiceAvailable === false) return;
         if (narrator.speaking) narrator.stop();
-        else narrator.speak(this.spokenStep());
+        else {
+            this._spokenHere = true;
+            narrator.speak(this.spokenStep());
+        }
     }
 
     _buildDom() {
@@ -233,16 +234,19 @@ export class AcademyFeature {
         this.state.anim = null;
         this.state.hintStage = 0;
         this.state.done = false;
+        this._spokenHere = false;
         if (this.state.filter !== null && this.state.filter !== l.category) {
             this.state.filter = l.category;
         }
         if (save) prefs.setLesson(l.id);
         if (challenge) {
+            narrator.stop();
             this._startChallenge();
         } else {
             this.state.message = '';
             this.state.tone = Tone.INFO;
             if (save) this.narrate();
+            else narrator.stop();
         }
         this._render();
     }
@@ -271,6 +275,7 @@ export class AcademyFeature {
         this.state.done = false;
         this.state.message = '';
         this.state.tone = Tone.INFO;
+        this._spokenHere = false;
         if (on) {
             narrator.stop();
             this._startChallenge();
@@ -288,6 +293,7 @@ export class AcademyFeature {
         if (t === this.state.cursor) return;
         this.state.anim = LinePlaybackController.transition(l.line, this.state.cursor, t);
         this.state.cursor = t;
+        this._spokenHere = false;
         this.narrate();
         this._render();
     }
@@ -313,8 +319,10 @@ export class AcademyFeature {
         this.goTo(this.lesson.line.size);
     }
 
+    /** Arrête la lecture automatique ; la voix se met en pause et reprendra au début de sa phrase. */
     pause() {
         this.playback.cancel();
+        narrator.pause();
         this.state.playing = false;
         this._render();
     }
@@ -327,10 +335,11 @@ export class AcademyFeature {
         this.state.playing = true;
         if (this.state.cursor >= l.line.size && this.state.cursor > 0) this.goTo(0);
         else {
-            this.narrate();
+            const resumed = narrator.resume();
+            if (!resumed && !this._spokenHere) this.narrate();
             this._render();
         }
-        let stepResult = null;
+        let stepResult = narrator.lastResult;
         const useNarration = () => Boolean(prefs.current.narration && this._voiceAvailable !== false);
         this.playback.autoplay({
             cursor: () => (this._destroyed ? null : this.state.cursor),
@@ -516,13 +525,14 @@ export class AcademyFeature {
             onPrev: !s.challenge ? () => this.step(-1) : null,
             onNext: !s.challenge ? () => this.step(1) : null,
             emptyText: "Les coups de la leçon s'afficheront ici.",
+            firstTurn: 1,
         });
 
         // Feedback + action buttons
         if (!s.challenge) {
             const title = cur === 0
                 ? 'Objectif de la leçon'
-                : `${moveLabel(line.positions[cur - 1].fullmove, line.positions[cur - 1].whiteToMove, line.sans[cur - 1])} · coup ${cur} / ${line.size}`;
+                : stepTitle(line, cur, { first: 1 });
             const text = cur === 0
                 ? `${l.summary} Touchez Lecture pour dérouler la leçon coup par coup.`
                 : l.texts[cur - 1];

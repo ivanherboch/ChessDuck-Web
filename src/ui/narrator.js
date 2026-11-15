@@ -12,6 +12,28 @@ const POST_CANCEL_DELAY_MS = 80;
 const POLL_INTERVAL_MS = 200;
 const IDLE_POLLS_REQUIRED = 3;
 
+/**
+ * Où reprendre [text] quand la voix a été interrompue au caractère [offset] : au début de la phrase en cours,
+ * comme les lecteurs à voix haute, pour ne jamais repartir au milieu d'un mot ni perdre le fil.
+ */
+export function resumePoint(text, offset) {
+    if (!text) return 0;
+    const clamped = Math.max(0, Math.min(text.length, offset || 0));
+    const before = text.slice(0, clamped);
+    let end = -1;
+    for (let idx = before.length - 1; idx >= 0; idx--) {
+        const ch = before[idx];
+        if (ch === '.' || ch === '!' || ch === '?' || ch === ':') {
+            end = idx;
+            break;
+        }
+    }
+    if (end < 0) return 0;
+    let i = end + 1;
+    while (i < text.length && /\s/.test(text[i])) i++;
+    return i;
+}
+
 export class WebNarrator {
     constructor() {
         this._available = null;
@@ -28,6 +50,9 @@ export class WebNarrator {
         this._lastCancelAt = 0;
         this._unlocked = false;
         this._gestureArmed = false;
+        this._paused = null;
+        this._activeText = '';
+        this._spokenAt = 0;
         this._lastResult = { played: false, started: false, durationMs: 0, elapsedMs: 0 };
 
         this._onGesture = () => {
@@ -44,6 +69,10 @@ export class WebNarrator {
 
     get speaking() {
         return this._speaking;
+    }
+
+    get paused() {
+        return this._paused;
     }
 
     get lastResult() {
@@ -329,11 +358,22 @@ export class WebNarrator {
 
         const chunks = this._splitChunks(clean);
         if (!chunks.length) return;
+        const chunkStarts = [];
+        let scanFrom = 0;
+        for (const ch of chunks) {
+            const pos = clean.indexOf(ch, scanFrom);
+            const st = pos >= 0 ? pos : scanFrom;
+            chunkStarts.push(st);
+            scanFrom = st + ch.length;
+        }
 
         const id = ++this._seq;
         this._clearTimers();
         this._utterances = [];
         this._unlockUtterance = null;
+        this._paused = null;
+        this._activeText = clean;
+        this._spokenAt = 0;
         const requestedAt = Date.now();
         this._lastResult = { played: false, started: false, durationMs: 0, elapsedMs: 0 };
         this._setSpeaking(true);
@@ -375,6 +415,8 @@ export class WebNarrator {
             attempt += 1;
             this._clearTimers();
             this._utterances = [];
+            this._activeText = '';
+            this._spokenAt = 0;
             const now = Date.now();
             this._lastResult = {
                 played: Boolean(played),
@@ -406,6 +448,7 @@ export class WebNarrator {
             chunkIdx = 0;
             chunkFinishedCount = 0;
             erroredCount = 0;
+            this._spokenAt = 0;
             try {
                 if (synth.speaking || synth.pending) {
                     this._lastCancelAt = Date.now();
@@ -449,16 +492,21 @@ export class WebNarrator {
 
                 let chunkDone = false;
 
-                const markStarted = () => {
+                const markStarted = (ev) => {
                     if (id !== this._seq || myAttempt !== attempt) return;
                     started = true;
                     sawSpeaking = true;
                     if (!synthStartedAt) synthStartedAt = Date.now();
                     idlePolls = 0;
+                    const baseAt = chunkStarts[chunkIdx] || 0;
+                    const rel = (ev && typeof ev.charIndex === 'number' && Number.isFinite(ev.charIndex))
+                        ? Math.max(0, ev.charIndex)
+                        : 0;
+                    this._spokenAt = Math.max(this._spokenAt, Math.min(clean.length, baseAt + rel));
                 };
 
-                u.onstart = markStarted;
-                u.onboundary = markStarted;
+                u.onstart = () => markStarted(null);
+                u.onboundary = (ev) => markStarted(ev);
 
                 u.onend = () => {
                     if (id !== this._seq || myAttempt !== attempt || chunkDone) return;
@@ -479,7 +527,7 @@ export class WebNarrator {
                     if (id !== this._seq || myAttempt !== attempt || chunkDone) return;
                     chunkDone = true;
                     // En cas d'échec avant démarrage, basculer entre u.voice explicite, voix alternative ou u.lang seul.
-                    if (!started && !sawSpeaking && chunkFinishedCount === 0 && erroredCount === 0 && retryAlternateVoice(voiceCandidate)) {
+                    if (!started && !sawSpeaking && chunkFinishedCount === 0 && erroredCount === 0 && retryAlternateVoice()) {
                         return;
                     }
                     erroredCount += 1;
@@ -499,7 +547,7 @@ export class WebNarrator {
                     if (synth.paused) synth.resume();
                 } catch {
                     if (id !== this._seq || myAttempt !== attempt) return;
-                    if (!started && !sawSpeaking && retryAlternateVoice(voiceCandidate)) return;
+                    if (!started && !sawSpeaking && retryAlternateVoice()) return;
                     finish(false);
                 }
             };
@@ -540,7 +588,7 @@ export class WebNarrator {
                 if (isPending) {
                     idlePolls = 0;
                     if (!started && !sawSpeaking) {
-                        if (elapsed >= PENDING_FALLBACK_MS && retryAlternateVoice(voiceCandidate)) {
+                        if (elapsed >= PENDING_FALLBACK_MS && retryAlternateVoice()) {
                             return;
                         }
                         if (elapsed > PENDING_STALL_MS) {
@@ -592,11 +640,39 @@ export class WebNarrator {
         }
     }
 
+    /** Arrête la lecture et oublie ce qui restait à lire. */
     stop() {
+        this._paused = null;
+        this._silence();
+    }
+
+    /** Met la lecture en pause : [resume] la reprendra au début de la phrase en cours. */
+    pause() {
+        if (!this._speaking) return;
+        const text = this._activeText;
+        const from = text ? resumePoint(text, this._spokenAt) : 0;
+        this._silence();
+        const rest = text.slice(from).trim();
+        this._paused = rest || null;
+    }
+
+    /** Reprend une lecture mise en pause ; renvoie faux s'il n'y avait rien à reprendre. */
+    resume() {
+        const rest = this._paused;
+        if (!rest) return false;
+        this._paused = null;
+        this.speak(rest);
+        return true;
+    }
+
+    /** Coupe la voix ; les fins de lecture de la phrase interrompue sont ignorées. */
+    _silence() {
         const wasActive = this._speaking || this._utterances.length > 0;
         this._seq++;
         this._clearTimers();
         this._utterances = [];
+        this._activeText = '';
+        this._spokenAt = 0;
         this._setSpeaking(false);
         const synth = this._synth();
         if (synth) {

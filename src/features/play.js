@@ -5,13 +5,12 @@ import { ChessBoardView, EvalBarView } from '../ui/board.js';
 import { PlayerBarView } from '../ui/captured.js';
 import {
     FeedbackCardView, ModuleLayoutView, MoveStripView, Tone,
-    duckButton, duckIconButton, el, openConfirmDialog,
+    duckButton, duckIconButton, el, openConfirmDialog, stepTitle,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 import { LinePlaybackController, moveAnim, undoAnim } from '../ui/line-playback.js';
 import { isTwoPane } from '../ui/theme.js';
-import { moveLabel } from './academy.js';
 import { GameAnalysisService } from './game-analysis.js';
 import { Analysis, GameLogic } from './game-logic.js';
 import { formatDate, openGameSettingsSheet, openHistorySheet } from './history-sheet.js';
@@ -1180,9 +1179,8 @@ export class PlayFeature {
             this.revFeedback.el.classList.remove('hidden');
             const cmt = ReviewComments.comment(g, line, cur - 1, r.analysis);
             const text = cmt.text + (cur === line.size ? ' ' + ReviewComments.ending(g) : '');
-            const before = line.positions[cur - 1];
             const note = notes[cur - 1];
-            const title = `Coup ${cur} / ${line.size} · ${moveLabel(before.fullmove, before.whiteToMove, line.sans[cur - 1])}${note ? ` ${note}` : ''}`;
+            const title = stepTitle(line, cur, { note });
             this.revFeedback.el.classList.toggle('is-wide-review', wide);
             this.revFeedback.update({ text, tone: cmt.tone, title });
         }

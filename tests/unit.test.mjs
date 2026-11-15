@@ -1031,3 +1031,149 @@ test('Academy: academyStepDelayMs waits post-speech pause or readable fallback w
         else globalThis.document = prevDoc;
     }
 });
+
+test('v2.4.3: turnOf, moveLabel, stepTitle standard turn numbering & lesson renumbering', async () => {
+    const { turnOf, moveLabel, stepTitle } = await import('../src/ui/common.js');
+    const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/lessons.json'), 'utf8'));
+    const lessons = Lessons.initFromData(raw);
+    const enfilade = lessons.find((l) => l.title === "L'enfilade");
+    assert.ok(enfilade, "La leçon L'enfilade doit exister");
+
+    assert.equal(turnOf(enfilade.line, 0, 1), 1);
+    assert.equal(moveLabel(1, false, 'Qxe5'), '1… Qxe5');
+    assert.equal(stepTitle(enfilade.line, 1, { first: 1 }), '1… Qxe5 · coup 1 sur 3');
+    assert.equal(stepTitle(enfilade.line, 2, { first: 1 }), '2. Bf4 · coup 2 sur 3');
+    assert.equal(stepTitle(enfilade.line, 4, { first: 1 }), '3. Bxb8 · coup 3 sur 3');
+
+    // Hors leçon (revue / partie libre) : vrais numéros de la partie + annotation optionnelle
+    assert.equal(stepTitle(enfilade.line, 1), '16… Qxe5 · coup 16 sur 18');
+    assert.equal(stepTitle(enfilade.line, 1, { note: '!!' }), '16… Qxe5 !! · coup 16 sur 18');
+});
+
+test('v2.4.4: SpokenFr pronunciation lexicon rewrites chess terms only for speech and covers all 113 lessons', async () => {
+    const { SpokenFr } = await import('../src/core/spoken-fr.js');
+
+    assert.equal(SpokenFr.text("C'est pat malgré une pièce de plus."), "C'est patte malgré une pièce de plus.");
+    assert.equal(SpokenFr.text('le gambit Evans'), 'le gambitte Évanse');
+    assert.equal(SpokenFr.text('échec et mat'), 'échec et matte');
+    assert.equal(SpokenFr.text('Un zugzwang typique du fianchetto.'), 'Un zougtsvang typique du fianquétto.');
+    assert.equal(SpokenFr.text(`${SpokenFr.move('Qh4#')}. Le coup final.`), 'dame h4, matte. Le coup final.');
+
+    // Mots voisins intacts
+    const nearby = 'Il faut mater sans perdre de matériel, avec patience.';
+    assert.equal(SpokenFr.text(nearby), nearby);
+
+    const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/lessons.json'), 'utf8'));
+    const lessons = Lessons.initFromData(raw);
+    const hard = /(?<![\p{L}-])(pat|mat|gambit|fianchetto|zugzwang|Giuoco|Kieseritzky|Najdorf|Winawer|Tarrasch|Grünfeld)(?![\p{L}-])/iu;
+    for (const l of lessons) {
+        for (const t of [...l.texts, l.summary, l.title]) {
+            const spoken = SpokenFr.text(t);
+            assert.equal(hard.test(spoken), false, `Terme difficile encore présent dans leçon ${l.id}: "${spoken}"`);
+        }
+    }
+});
+
+test('v2.4.5: resumePoint and WebNarrator pause/resume at interrupted sentence start & stop clearing', async () => {
+    const spoken = [];
+    let cancels = 0;
+
+    class MockUtterance {
+        constructor(text) {
+            this.text = text;
+            this.lang = '';
+            this.voice = null;
+            this.volume = 1;
+            this.rate = 1;
+            this.pitch = 1;
+            this.onstart = null;
+            this.onboundary = null;
+            this.onend = null;
+            this.onerror = null;
+        }
+    }
+
+    const mockSynth = {
+        speaking: false,
+        pending: false,
+        paused: false,
+        getVoices: () => [{ lang: 'fr-FR', name: 'Amélie', localService: true, default: true }],
+        speak(u) {
+            spoken.push(u);
+            this.speaking = true;
+        },
+        cancel() {
+            cancels += 1;
+            this.speaking = false;
+            this.pending = false;
+        },
+        resume() {},
+        addEventListener() {},
+    };
+
+    await withMockBrowserEnv({
+        ua: CHROME_DESKTOP_UA,
+        win: {
+            SpeechSynthesisUtterance: MockUtterance,
+            speechSynthesis: mockSynth,
+            addEventListener() {},
+            removeEventListener() {},
+        },
+        doc: { visibilityState: 'visible', addEventListener() {} },
+    }, async () => {
+        const { narrator, resumePoint } = await import('../src/ui/narrator.js?pause=1');
+
+        const sample = 'Le fou sort. Il vise la case f7 : seul le roi la protège.';
+        assert.equal(resumePoint(sample, 7), 0);
+        assert.equal(resumePoint(sample, sample.indexOf('case')), sample.indexOf('Il vise'));
+        assert.equal(resumePoint(sample, sample.indexOf('protège') + 3), sample.indexOf('seul'));
+
+        narrator.prepare();
+        narrator.speak(sample);
+        assert.equal(spoken.length, 1);
+        spoken[0].onstart?.();
+        spoken[0].onboundary?.({ charIndex: sample.indexOf('case') });
+
+        // Pause -> coupe la voix, retient la phrase interrompue
+        narrator.pause();
+        assert.equal(narrator.speaking, false);
+        assert.ok(cancels >= 1);
+        assert.equal(narrator.paused, 'Il vise la case f7 : seul le roi la protège.');
+
+        // Resume -> reprend depuis le début de la phrase interrompue
+        assert.equal(narrator.resume(), true);
+        assert.equal(narrator.paused, null);
+        assert.equal(narrator.speaking, true);
+        const resumedRes = narrator.awaitIdle();
+        await new Promise((r) => setTimeout(r, 95));
+        assert.equal(spoken.length, 2);
+        assert.equal(spoken[1].text, 'Il vise la case f7 : seul le roi la protège.');
+        mockSynth.speaking = false;
+        spoken[1].onstart?.();
+        spoken[1].onend?.();
+        const done = await resumedRes;
+        assert.equal(done.played, true);
+
+        // Multi-chunk pause during 2nd chunk preserves remaining text from interrupted sentence across chunk boundary
+        spoken.length = 0;
+        const multi = "Première phrase complète d'introduction sur l'ouverture italienne au centre. "
+            + "Deuxième phrase expliquant comment le fou attaque le point faible f7 devant le roque noir. "
+            + 'Troisième phrase finale pour conclure la leçon.';
+        narrator.speak(multi);
+        assert.equal(spoken.length, 1);
+        spoken[0].onstart?.();
+        spoken[0].onend?.();
+        assert.equal(spoken.length, 2);
+        spoken[1].onstart?.();
+        spoken[1].onboundary?.({ charIndex: spoken[1].text.indexOf('faible') });
+        narrator.pause();
+        assert.ok(narrator.paused?.startsWith('Deuxième phrase expliquant'));
+        assert.ok(narrator.paused?.endsWith('Troisième phrase finale pour conclure la leçon.'));
+
+        // stop() clears paused remainder
+        narrator.stop();
+        assert.equal(narrator.paused, null);
+        assert.equal(narrator.resume(), false);
+    });
+});
+

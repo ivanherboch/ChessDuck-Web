@@ -244,7 +244,28 @@ export class FeedbackCardView {
     }
 }
 
-/** Bande horizontale des coups joués avec boutons Précédent / Suivant. */
+/** Numéro de tour du demi-coup [i], la ligne commençant au tour [first] (par défaut, le vrai numéro de la partie). */
+export function turnOf(line, i, first = line.positions[0].fullmove) {
+    return line.positions[i].fullmove - line.positions[0].fullmove + first;
+}
+
+/** Libellé d'un coup : « 6. O-O » pour les Blancs, « 12… Qe5+ » pour les Noirs. */
+export function moveLabel(turn, white, san) {
+    return white ? `${turn}. ${san}` : `${turn}… ${san}`;
+}
+
+/** Titre de carte pour la position après [cursor] demi-coups : « 12… Qe5+ · coup 12 sur 14 ». */
+export function stepTitle(line, cursor, { first = line.positions[0].fullmove, note = null } = {}) {
+    const i = cursor - 1;
+    const turn = turnOf(line, i, first);
+    const label = moveLabel(turn, line.positions[i].whiteToMove, line.sans[i]);
+    return `${label}${note ? ` ${note}` : ''} · coup ${turn} sur ${turnOf(line, line.size - 1, first)}`;
+}
+
+/**
+ * Bande horizontale des coups joués, regroupés par tour : chaque capsule réunit le numéro du tour (en bleu),
+ * le coup des Blancs et la réponse des Noirs. Seul le coup affiché est surligné. Flèches précédent / suivant.
+ */
 export class MoveStripView {
     constructor() {
         this.el = el('div', 'move-strip');
@@ -263,8 +284,11 @@ export class MoveStripView {
         this._onPrev = null;
         this._onNext = null;
         this._lastLineRef = null;
+        this._lastSize = -1;
+        this._lastFirstTurn = null;
         this._lastCursor = -1;
         this._lastInteractive = null;
+        this._moveEls = [];
     }
 
     update({
@@ -276,6 +300,7 @@ export class MoveStripView {
         prevEnabled = cursor > 0,
         nextEnabled = line ? cursor < line.size : false,
         emptyText = 'Les coups de la partie s\'afficheront ici.',
+        firstTurn = null,
     }) {
         this._onPrev = onPrev;
         this._onNext = onNext;
@@ -285,47 +310,67 @@ export class MoveStripView {
         this._nextBtn.disabled = !nextEnabled;
 
         if (!line) return;
+        const first = firstTurn ?? line.positions[0].fullmove;
         const interactive = Boolean(onSelect);
-        if (this._lastLineRef !== line || this._list.childElementCount !== (line.size || 1) || this._lastInteractive !== interactive) {
+        if (this._lastLineRef !== line || this._lastSize !== line.size || this._lastFirstTurn !== first || this._lastInteractive !== interactive) {
             this._lastLineRef = line;
+            this._lastSize = line.size;
+            this._lastFirstTurn = first;
             this._lastInteractive = interactive;
             this._lastCursor = -1;
+            this._moveEls = new Array(line.size);
             const frag = document.createDocumentFragment();
             if (line.size === 0) {
                 frag.appendChild(el('span', 'move-strip-empty', emptyText));
             } else {
+                const turns = [];
                 for (let i = 0; i < line.size; i++) {
-                    const before = line.positions[i];
-                    const label = (before.whiteToMove ? `${before.fullmove}. ` : '') + line.sans[i];
-                    const item = document.createElement(onSelect ? 'button' : 'span');
-                    if (onSelect) {
-                        item.type = 'button';
-                        item.setAttribute('aria-label', `Aller au coup ${label}`);
-                        item.addEventListener('click', () => {
-                            feedback.key();
-                            onSelect(i + 1);
-                        });
+                    const turn = turnOf(line, i, first);
+                    const lastGrp = turns[turns.length - 1];
+                    if (lastGrp && lastGrp.turn === turn) lastGrp.plies.push(i);
+                    else turns.push({ turn, plies: [i] });
+                }
+                for (const { turn, plies } of turns) {
+                    const capsule = el('div', 'move-strip-turn');
+                    const blackFirst = !line.positions[plies[0]].whiteToMove;
+                    const numEl = el('span', 'move-strip-turn-num', blackFirst ? `${turn}…` : `${turn}`);
+                    numEl.setAttribute('aria-hidden', 'true');
+                    capsule.appendChild(numEl);
+                    for (const i of plies) {
+                        const white = line.positions[i].whiteToMove;
+                        const label = moveLabel(turn, white, line.sans[i]);
+                        const item = document.createElement(onSelect ? 'button' : 'span');
+                        if (onSelect) {
+                            item.type = 'button';
+                            item.setAttribute('aria-label', `Aller au coup ${label}`);
+                            item.addEventListener('click', () => {
+                                feedback.key();
+                                onSelect(i + 1);
+                            });
+                        }
+                        item.className = `move-strip-item ${white ? 'is-white' : 'is-black'}`;
+                        item.textContent = line.sans[i];
+                        item._capsule = capsule;
+                        this._moveEls[i] = item;
+                        capsule.appendChild(item);
                     }
-                    item.className = `move-strip-item ${before.whiteToMove ? 'is-white' : 'is-black'}`;
-                    item.textContent = label;
-                    frag.appendChild(item);
+                    frag.appendChild(capsule);
                 }
             }
             this._list.replaceChildren(frag);
         }
 
         if (this._lastCursor !== cursor && line.size > 0) {
-            const kids = this._list.children;
-            if (this._lastCursor > 0 && kids[this._lastCursor - 1]) {
-                kids[this._lastCursor - 1].classList.remove('is-current');
-                kids[this._lastCursor - 1].setAttribute('aria-current', 'false');
+            if (this._lastCursor > 0 && this._moveEls[this._lastCursor - 1]) {
+                this._moveEls[this._lastCursor - 1].classList.remove('is-current');
+                this._moveEls[this._lastCursor - 1].setAttribute('aria-current', 'false');
             }
-            if (cursor > 0 && kids[cursor - 1]) {
-                const curEl = kids[cursor - 1];
+            if (cursor > 0 && this._moveEls[cursor - 1]) {
+                const curEl = this._moveEls[cursor - 1];
                 curEl.classList.add('is-current');
                 curEl.setAttribute('aria-current', 'true');
                 try {
-                    curEl.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+                    (curEl._capsule || curEl).scrollIntoView({ inline: 'nearest', block: 'nearest' });
                 } catch { /* ignore */ }
             }
             this._lastCursor = cursor;

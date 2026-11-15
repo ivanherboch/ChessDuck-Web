@@ -7,6 +7,25 @@ import { PieceLexiconFr } from './piece-fr.js';
 const SAN_IN_TEXT = /(?<![\p{L}\p{N}_])(?:\d+\.(?:\.\.)?\s?)?(O-O-O|O-O|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)(?![\p{L}\p{N}_])/gu;
 
 /**
+ * Mots que la synthèse vocale française prononce mal (« pat » lu « pa », « gambit » lu « gambi »…), écrits
+ * comme ils se disent. Ce lexique ne sert qu'à la voix : l'écran affiche toujours l'orthographe correcte.
+ */
+function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const PRONUNCIATION = [
+    ['pat', 'patte'], ['mat', 'matte'], ['mats', 'mattes'],
+    ['gambit', 'gambitte'], ['gambits', 'gambittes'],
+    ['fianchetto', 'fianquétto'], ['zugzwang', 'zougtsvang'],
+    ['Giuoco', 'Djouoco'], ['Fegatello', 'Fégatello'], ['Kieseritzky', 'Kizéritski'],
+    ['Sveshnikov', 'Svéchnikov'], ['Najdorf', 'Naïdorf'], ['Winawer', 'Vinaver'], ['Tarrasch', 'Tarache'],
+    ['Caro-Kann', 'Caro-Kane'], ['Grünfeld', 'Grunfèlde'], ['Alekhine', 'Aliékhine'], ['Pirc', 'Pirtse'],
+    ['Rubinstein', 'Roubinnchtaïne'], ['Fischer', 'Fichère'], ['Lucena', 'Loucéna'], ['Boden', 'Bodène'],
+    ['Evans', 'Évanse'], ['Petrov', 'Pétrof'], ['Kasparov', 'Kasparof'],
+].map(([word, said]) => [new RegExp(`(?<![\\p{L}-])${escapeRegExp(word)}(?![\\p{L}-])`, 'giu'), said]);
+
+/**
  * Notation des coups (SAN anglaise) prononcée en français pour la synthèse vocale :
  * « Nxe5+ » → « cavalier prend e5, échec », « O-O » → « petit roque », « exd5 » → « e prend d5 ».
  */
@@ -43,9 +62,16 @@ export const SpokenFr = Object.freeze({
         return parts.join(' ') + suffix;
     },
 
-    /** Phrase à lire : chaque coup en notation est remplacé par sa forme parlée, la mise en gras est retirée. */
+    /**
+     * Phrase à lire : chaque coup en notation est remplacé par sa forme parlée, la mise en gras est retirée,
+     * et les mots difficiles sont réécrits comme ils se prononcent.
+     */
     text(s) {
         if (!s) return '';
-        return s.replaceAll('**', '').replace(SAN_IN_TEXT, (_, san) => SpokenFr.move(san));
+        let out = s.replaceAll('**', '').replace(SAN_IN_TEXT, (_, san) => SpokenFr.move(san));
+        for (const [re, said] of PRONUNCIATION) {
+            out = out.replace(re, said);
+        }
+        return out;
     },
 });

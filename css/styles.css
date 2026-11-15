@@ -1,4 +1,4 @@
-/* ChessDuck v2.4.2 — Ardoise & Or + Mode Enfant (Fredoka) */
+/* ChessDuck v2.4.5 — Ardoise & Or + Mode Enfant (Fredoka) */
 
 @font-face {
     font-family: 'Fredoka';
@@ -1332,13 +1332,13 @@ input[type="search"] {
 .move-strip-list {
     flex: 1 1 0%;
     min-width: 0;
-    height: 36px;
+    height: 38px;
     border-radius: 10px;
     background: var(--surface);
-    padding: 0 5px;
+    padding: 0 4px;
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 6px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -1356,12 +1356,34 @@ input[type="search"] {
     padding: 0 6px;
 }
 
+.move-strip-turn {
+    flex: 0 0 auto;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--surface-hi);
+    padding: 0 2px 0 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.move-strip-turn-num {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--blue-text);
+    padding-right: 2px;
+    user-select: none;
+    white-space: nowrap;
+}
+
 .move-strip-item {
     flex: 0 0 auto;
     border: none;
     background: transparent;
-    border-radius: 7px;
-    padding: 4px 7px;
+    border-radius: 8px;
+    padding: 4px 6px;
     font-size: 12px;
     font-weight: 500;
     line-height: 1.2;
