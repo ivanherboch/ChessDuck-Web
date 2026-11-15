@@ -83,6 +83,7 @@ export class AcademyFeature {
             if (this._destroyed) return;
             if (st.narration !== this._lastNarration) {
                 this._lastNarration = st.narration;
+                this._spokenHere = false;
                 if (st.narration) narrator.prepare();
                 else narrator.stop();
                 if (Lessons.all.length && !this.state.challenge) this._render();
@@ -138,6 +139,7 @@ export class AcademyFeature {
     silence() {
         this.pause();
         narrator.stop();
+        this._spokenHere = false;
     }
 
     get lesson() {
@@ -162,8 +164,10 @@ export class AcademyFeature {
 
     toggleSpeech() {
         if (this._voiceAvailable === false) return;
-        if (narrator.speaking) narrator.stop();
-        else {
+        if (narrator.speaking) {
+            narrator.stop();
+            this._spokenHere = false;
+        } else {
             this._spokenHere = true;
             narrator.speak(this.spokenStep());
         }
@@ -336,7 +340,8 @@ export class AcademyFeature {
         if (this.state.cursor >= l.line.size && this.state.cursor > 0) this.goTo(0);
         else {
             const resumed = narrator.resume();
-            if (!resumed && !this._spokenHere) this.narrate();
+            const failedHere = !narrator.speaking && !narrator.lastResult?.played;
+            if (!resumed && (!this._spokenHere || failedHere)) this.narrate();
             this._render();
         }
         let stepResult = narrator.lastResult;

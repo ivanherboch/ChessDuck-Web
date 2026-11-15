@@ -1376,5 +1376,307 @@ test('v2.4.7: measureEvalBarWidth grows for large font scaling without clipping 
     assert.ok(measureEvalBarWidth({ measureFn: (s) => s.length * 10 }) >= 48);
 });
 
+test('Voice & sound mobile fixes: Android cold start, -network scoring, post-silence race (Android & iOS), chunk-2 slow start, not-allowed, FeedbackService', async () => {
+    class MockUtterance {
+        constructor(text) {
+            this.text = text;
+            this.lang = '';
+            this.voice = null;
+            this.volume = 1;
+            this.rate = 1;
+            this.pitch = 1;
+            this.onstart = null;
+            this.onboundary = null;
+            this.onend = null;
+            this.onerror = null;
+        }
+    }
+
+    // 1) Android Chrome: -network deprioritized, 1350ms cold start & 1900ms pending tolerated, post-stop 130ms delay, slow chunk 2
+    {
+        const spoken = [];
+        let cancels = 0;
+        const netVoice = { lang: 'fr-FR', name: 'fr-fr-x-fra-network', voiceURI: 'fr-fr-x-fra-network', localService: true, default: false };
+        const localVoice = { lang: 'fr-FR', name: 'fr-fr-x-frd-local', voiceURI: 'fr-fr-x-frd-local', localService: true, default: false };
+
+        const mockSynth = {
+            speaking: false,
+            pending: false,
+            paused: false,
+            getVoices: () => [netVoice, localVoice],
+            resume() { this.paused = false; },
+            cancel() { cancels += 1; this.speaking = false; this.pending = false; },
+            speak(u) { spoken.push(u); },
+            addEventListener() {},
+        };
+
+        await withMockBrowserEnv({
+            ua: CHROME_ANDROID_UA,
+            nav: { userAgent: CHROME_ANDROID_UA, onLine: true },
+            win: { SpeechSynthesisUtterance: MockUtterance, speechSynthesis: mockSynth, addEventListener() {}, removeEventListener() {} },
+            doc: { visibilityState: 'visible', addEventListener() {} },
+        }, async () => {
+            const { narrator } = await import('../src/ui/narrator.js?androidfix=1');
+            try {
+                narrator.prepare();
+                assert.ok(narrator._scoreVoice(localVoice) > narrator._scoreVoice(netVoice), 'Local Android voice must outscore -network voice');
+                assert.equal(narrator._voice, localVoice);
+
+                // Offline excludes -network voices even when Chromium erroneously flags localService = true
+                globalThis.navigator.onLine = false;
+                const onlyNetSynth = { ...mockSynth, getVoices: () => [netVoice] };
+                globalThis.window.speechSynthesis = onlyNetSynth;
+                narrator.prepare();
+                assert.equal(narrator._voice, null, 'Offline must ignore -network Android voices');
+                globalThis.navigator.onLine = true;
+                globalThis.window.speechSynthesis = mockSynth;
+                narrator.prepare();
+
+                // 1a) Cold start 1350ms silently waiting (!speaking && !pending) on candidate 0 (voice = null) must NOT abort at 950ms
+                spoken.length = 0;
+                cancels = 0;
+                narrator.speak('Le cavalier contrôle le centre.');
+                assert.equal(spoken.length, 1);
+                assert.equal(spoken[0].voice, null);
+                assert.equal(spoken[0].volume, 1.0);
+                const pCold = narrator.awaitIdle();
+                await new Promise((r) => setTimeout(r, 1350));
+                assert.equal(cancels, 0, 'Must NOT cancel candidate 0 (null) at 950ms during 1350ms Android cold start');
+                assert.equal(narrator.speaking, true);
+                mockSynth.speaking = true;
+                spoken[0].onstart?.();
+                await new Promise((r) => setTimeout(r, 40));
+                mockSynth.speaking = false;
+                spoken[0].onend?.();
+                const coldRes = await pCold;
+                assert.equal(coldRes.played, true);
+                assert.equal(spoken.length, 1);
+
+                // 1b) Pending state for 1900ms on candidate 0 (voice = null) must NOT abort at 1600ms
+                spoken.length = 0;
+                cancels = 0;
+                const origSpeak = mockSynth.speak.bind(mockSynth);
+                mockSynth.speak = (u) => {
+                    mockSynth.pending = true;
+                    origSpeak(u);
+                };
+                narrator.speak('Attente moteur Android.');
+                mockSynth.speak = origSpeak;
+                const pPend = narrator.awaitIdle();
+                await new Promise((r) => setTimeout(r, 1900));
+                assert.equal(cancels, 0, 'Must NOT abort pending voice=null at 1600ms');
+                assert.equal(narrator.speaking, true);
+                mockSynth.pending = false;
+                mockSynth.speaking = true;
+                spoken[0].onstart?.();
+                mockSynth.speaking = false;
+                spoken[0].onend?.();
+                assert.equal((await pPend).played, true);
+
+                // 1c) Immediate stop() -> speak() must honor >=110ms Android Binder post-cancel delay even when !synth.speaking
+                spoken.length = 0;
+                cancels = 0;
+                narrator.speak('Première annonce');
+                spoken[0].onstart?.();
+                narrator.stop();
+                const tSwitch = Date.now();
+                narrator.speak('Deuxième annonce');
+                assert.equal(spoken.length, 1, 'Speak right after stop() on Android must defer instead of colliding');
+                await new Promise((r) => setTimeout(r, 160));
+                assert.equal(spoken.length, 2);
+                assert.ok(Date.now() - tSwitch >= 110, 'Deferred launch should wait ~130ms after stop()');
+                spoken[1].onstart?.();
+                spoken[1].onend?.();
+                await narrator.awaitIdle();
+
+                // 1d) Multi-chunk slow start (900ms before chunk 2 fires onstart) must NOT cut off chunk 2 prematurely
+                spoken.length = 0;
+                const twoChunks = "Première phrase assez longue pour dépasser cent quarante caractères une fois combinée avec la suite de cette leçon d'échecs. "
+                    + 'Deuxième phrase tout aussi essentielle qui démarre lentement.';
+                narrator.speak(twoChunks);
+                const pMulti = narrator.awaitIdle();
+                assert.equal(spoken.length, 1);
+                spoken[0].onstart?.();
+                spoken[0].onend?.();
+                assert.equal(spoken.length, 2);
+                await new Promise((r) => setTimeout(r, 900));
+                assert.equal(narrator.speaking, true, 'Slow chunk 2 at 900ms must still be active and not cut off by idlePolls');
+                assert.equal(spoken.length, 2);
+                spoken[1].onstart?.();
+                spoken[1].onend?.();
+                assert.equal((await pMulti).played, true);
+            } finally {
+                narrator.stop();
+            }
+        });
+    }
+
+    // 2) iOS Safari: pause()->speak() cancel-drop recovery AND 'not-allowed' re-arming
+    {
+        const listeners = new Map();
+        const spoken = [];
+        let dropNext = false;
+        let mode = 'normal';
+
+        const mockSynth = {
+            speaking: false,
+            pending: false,
+            paused: false,
+            getVoices: () => [{ lang: 'fr-FR', name: 'Amélie', localService: true, default: true }],
+            resume() {},
+            cancel() { this.speaking = false; this.pending = false; },
+            speak(u) {
+                spoken.push(u);
+                if (u.text === ' ') { queueMicrotask(() => u.onend?.()); return; }
+                if (mode === 'notAllowed') {
+                    queueMicrotask(() => u.onerror?.({ error: 'not-allowed' }));
+                    return;
+                }
+                if (dropNext) {
+                    dropNext = false;
+                    return;
+                }
+                this.speaking = true;
+                setTimeout(() => {
+                    u.onstart?.();
+                    setTimeout(() => {
+                        this.speaking = false;
+                        u.onend?.();
+                    }, 15);
+                }, 10);
+            },
+            addEventListener() {},
+        };
+
+        await withMockBrowserEnv({
+            ua: IOS_SAFARI_UA,
+            win: {
+                SpeechSynthesisUtterance: MockUtterance,
+                speechSynthesis: mockSynth,
+                addEventListener: (t, fn) => listeners.set(t, fn),
+                removeEventListener: (t) => listeners.delete(t),
+            },
+            doc: { visibilityState: 'visible', addEventListener() {} },
+        }, async () => {
+            const { narrator } = await import('../src/ui/narrator.js?iosfix=1');
+            try {
+                narrator.prepare();
+
+                // 2a) pause() -> _silence() (sync clears mockSynth.speaking) -> immediate speak() dropped once recovers via CANCEL_RETRY_MS
+                narrator.speak('Coup un en cours');
+                await new Promise((r) => setTimeout(r, 20));
+                narrator.pause();
+                spoken.length = 0;
+                dropNext = true;
+                narrator.speak('Coup deux juste après');
+                const iosRetry = await narrator.awaitIdle(2000);
+                assert.equal(iosRetry.played, true, 'iOS speak() immediately after pause()/_silence() must recover from cancel drop');
+                assert.ok(spoken.length >= 2);
+
+                // 2b) onerror('not-allowed') aborts cleanly without burning fallback voices and re-arms click unlock
+                listeners.clear();
+                spoken.length = 0;
+                mode = 'notAllowed';
+                narrator.speak('Sans geste utilisateur');
+                const naRes = await narrator.awaitIdle(2000);
+                assert.equal(naRes.played, false);
+                assert.equal(naRes.error, 'not-allowed');
+                assert.equal(spoken.length, 1, 'not-allowed should not wastefully retry other voices');
+                assert.ok(listeners.has('click'), 'not-allowed must re-arm gesture unlock on iOS');
+            } finally {
+                narrator.stop();
+            }
+        });
+    }
+
+    // 3) FeedbackService: suspended -> interrupted recovery, concurrent decode safety, and 0.65 audible wood move gain
+    {
+        const prevWinDesc = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        const prevDocDesc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+        const prevNavDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+        const prevFetch = globalThis.fetch;
+
+        let fetchCount = 0;
+        const plays = [];
+        let ctxInstance = null;
+
+        class MockAudioContext {
+            constructor() {
+                this.state = 'suspended';
+                this.destination = {};
+                ctxInstance = this;
+            }
+            resume() {
+                this.state = 'running';
+                return Promise.resolve();
+            }
+            decodeAudioData(buf) {
+                // Simulate mobile failure when decoding before context is running; test clone avoids detached ArrayBuffer!
+                if (this.state !== 'running') {
+                    return Promise.reject(new Error('EncodingError while suspended'));
+                }
+                return Promise.resolve({ duration: 0.14, byteLength: buf.byteLength });
+            }
+            createBuffer() {
+                return {};
+            }
+            createBufferSource() {
+                const src = {
+                    buffer: null,
+                    connect(node) { this._dest = node; },
+                    start() {
+                        if (this.buffer && this._dest?.gain) {
+                            plays.push({ gain: this._dest.gain.value, duration: this.buffer.duration });
+                        }
+                    },
+                };
+                return src;
+            }
+            createGain() {
+                return { gain: { value: 1 }, connect() {} };
+            }
+        }
+
+        Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: { AudioContext: MockAudioContext, addEventListener() {}, removeEventListener() {} } });
+        Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: { visibilityState: 'visible', addEventListener() {} } });
+        Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value: { userActivation: { hasBeenActive: true } } });
+        globalThis.fetch = async () => {
+            fetchCount += 1;
+            return { ok: true, arrayBuffer: async () => new ArrayBuffer(12392) };
+        };
+
+        try {
+            const { FeedbackService } = await import('../src/ui/feedback.js?fb=1');
+            const svc = new FeedbackService();
+
+            // Simulate first gesture + immediate first move while context resumes and sound decodes asynchronously
+            svc.unlock();
+            svc.move();
+            await new Promise((r) => setTimeout(r, 30));
+            assert.equal(fetchCount, 1, 'wood_move.wav should be fetched only once via cached _rawPromise');
+            assert.ok(ctxInstance && ctxInstance.state === 'running');
+            assert.equal(plays.length, 1, 'First move must play once async resume + decode complete');
+            assert.equal(plays[0].gain, 0.65, 'Move gain must be raised to 0.65 for audible wood tap');
+
+            // Simulate iOS audio interruption -> next move must resume cleanly and play
+            ctxInstance.state = 'interrupted';
+            svc.move();
+            await new Promise((r) => setTimeout(r, 20));
+            assert.equal(ctxInstance.state, 'running');
+            assert.equal(plays.length, 2, 'Move after iOS interrupted state must auto-resume and play');
+        } finally {
+            if (prevWinDesc) Object.defineProperty(globalThis, 'window', prevWinDesc);
+            else delete globalThis.window;
+            if (prevDocDesc) Object.defineProperty(globalThis, 'document', prevDocDesc);
+            else delete globalThis.document;
+            if (prevNavDesc) Object.defineProperty(globalThis, 'navigator', prevNavDesc);
+            else delete globalThis.navigator;
+            if (prevFetch === undefined) delete globalThis.fetch;
+            else globalThis.fetch = prevFetch;
+        }
+    }
+});
+
+
 
 

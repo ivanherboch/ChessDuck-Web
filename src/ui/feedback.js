@@ -1,46 +1,89 @@
 /** Retours sensoriels : son feutré de pièce en bois (wood_move.wav) + vibrations si disponibles. */
-class FeedbackService {
+const MOVE_GAIN = 0.65;
+
+export class FeedbackService {
     constructor() {
         this.hapticsEnabled = true;
         this.soundEnabled = true;
         this._ctx = null;
         this._buffer = null;
-        this._loading = false;
-        this._audioEl = null;
+        this._rawPromise = null;
+        this._loadPromise = null;
         this._unlocked = false;
+        this._iosSilentPrimed = false;
+    }
+
+    _ensureCtx() {
+        if (typeof window === 'undefined') return null;
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx && !this._ctx) {
+            this._ctx = new Ctx();
+        }
+        return this._ctx;
+    }
+
+    _primeSilent(ctx) {
+        if (this._iosSilentPrimed || !ctx) return;
+        try {
+            const b = ctx.createBuffer(1, 1, 22050);
+            const src = ctx.createBufferSource();
+            src.buffer = b;
+            src.connect(ctx.destination);
+            src.start(0);
+            if (ctx.state === 'running') this._iosSilentPrimed = true;
+        } catch { /* ignore */ }
     }
 
     unlock() {
-        if (this._unlocked) return;
         this._unlocked = true;
         try {
-            const Ctx = window.AudioContext || window.webkitAudioContext;
-            if (Ctx && !this._ctx) {
-                this._ctx = new Ctx();
+            const ctx = this._ensureCtx();
+            if (!ctx) return;
+            if (ctx.state !== 'running') {
+                const p = ctx.resume();
+                if (p && typeof p.then === 'function') {
+                    p.then(() => {
+                        this._primeSilent(ctx);
+                        this._loadSound();
+                    }).catch(() => {});
+                }
             }
-            if (this._ctx && this._ctx.state === 'suspended') {
-                this._ctx.resume().catch(() => {});
-            }
+            this._primeSilent(ctx);
             this._loadSound();
         } catch { /* ignore */ }
     }
 
     async _loadSound() {
-        if (this._buffer || this._loading || !this._ctx) return;
-        this._loading = true;
-        try {
-            const res = await fetch('./assets/wood_move.wav');
-            if (!res.ok) return;
-            const arr = await res.arrayBuffer();
-            this._buffer = await new Promise((resolve, reject) => {
-                const p = this._ctx.decodeAudioData(arr, resolve, reject);
-                if (p && typeof p.then === 'function') p.then(resolve, reject);
-            });
-        } catch {
-            // Fallback HTMLAudio if WebAudio decode unavailable
-        } finally {
-            this._loading = false;
-        }
+        const ctx = this._ctx;
+        if (this._buffer || !ctx) return this._buffer;
+        if (this._loadPromise) return this._loadPromise;
+        this._loadPromise = (async () => {
+            try {
+                if (!this._rawPromise) {
+                    this._rawPromise = fetch('./assets/wood_move.wav')
+                        .then((res) => (res.ok ? res.arrayBuffer() : null))
+                        .catch(() => null);
+                }
+                const arr = await this._rawPromise;
+                if (!arr) {
+                    this._rawPromise = null;
+                    return null;
+                }
+                // Copie car decodeAudioData détache l'ArrayBuffer transmis.
+                const copy = arr.slice(0);
+                this._buffer = await new Promise((resolve, reject) => {
+                    const p = ctx.decodeAudioData(copy, resolve, reject);
+                    if (p && typeof p.then === 'function') p.then(resolve, reject);
+                });
+                return this._buffer;
+            } catch {
+                // Un prochain geste retentera le décodage si l'AudioContext était encore suspendu.
+                return null;
+            } finally {
+                this._loadPromise = null;
+            }
+        })();
+        return this._loadPromise;
     }
 
     _canUseMedia() {
@@ -60,19 +103,47 @@ class FeedbackService {
         } catch { /* unsupported on iOS Safari */ }
     }
 
+    _playBuffer(ctx) {
+        if (!ctx || !this._buffer) return;
+        try {
+            const src = ctx.createBufferSource();
+            src.buffer = this._buffer;
+            const gain = ctx.createGain();
+            gain.gain.value = MOVE_GAIN;
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            src.start(0);
+        } catch { /* ignore */ }
+    }
+
+    _playAfterLoad(ctx) {
+        this._loadSound().then(() => {
+            if (this.soundEnabled && this._ctx === ctx && ctx.state === 'running' && this._buffer) {
+                this._playBuffer(ctx);
+            }
+        }).catch(() => {});
+    }
+
     move() {
         if (this.soundEnabled && this._canUseMedia()) {
-            if (this._ctx && this._buffer) {
-                try {
-                    if (this._ctx.state === 'suspended') this._ctx.resume().catch(() => {});
-                    const src = this._ctx.createBufferSource();
-                    src.buffer = this._buffer;
-                    const gain = this._ctx.createGain();
-                    gain.gain.value = 0.2;
-                    src.connect(gain);
-                    gain.connect(this._ctx.destination);
-                    src.start(0);
-                } catch { /* ignore */ }
+            const ctx = this._ensureCtx();
+            if (ctx) {
+                if (ctx.state !== 'running') {
+                    try {
+                        const p = ctx.resume();
+                        if (p && typeof p.then === 'function') {
+                            p.then(() => {
+                                if (!this.soundEnabled || this._ctx !== ctx || ctx.state !== 'running') return;
+                                if (this._buffer) this._playBuffer(ctx);
+                                else this._playAfterLoad(ctx);
+                            }).catch(() => {});
+                        }
+                    } catch { /* ignore */ }
+                } else if (this._buffer) {
+                    this._playBuffer(ctx);
+                } else {
+                    this._playAfterLoad(ctx);
+                }
             }
         }
         this._buzz(12);
@@ -86,13 +157,22 @@ class FeedbackService {
 export const feedback = new FeedbackService();
 
 if (typeof window !== 'undefined') {
-    const onFirstGesture = () => {
-        feedback.unlock();
-        window.removeEventListener('pointerdown', onFirstGesture, true);
-        window.removeEventListener('touchstart', onFirstGesture, true);
-        window.removeEventListener('keydown', onFirstGesture, true);
+    const onGesture = () => {
+        if (!feedback._unlocked || !feedback._ctx || feedback._ctx.state !== 'running' || !feedback._buffer) {
+            feedback.unlock();
+        }
     };
-    window.addEventListener('pointerdown', onFirstGesture, true);
-    window.addEventListener('touchstart', onFirstGesture, { capture: true, passive: true });
-    window.addEventListener('keydown', onFirstGesture, true);
+    window.addEventListener('pointerdown', onGesture, { capture: true, passive: true });
+    window.addEventListener('touchstart', onGesture, { capture: true, passive: true });
+    window.addEventListener('pointerup', onGesture, { capture: true, passive: true });
+    window.addEventListener('touchend', onGesture, { capture: true, passive: true });
+    window.addEventListener('click', onGesture, { capture: true, passive: true });
+    window.addEventListener('keydown', onGesture, { capture: true, passive: true });
+}
+if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && feedback._unlocked && feedback._ctx && feedback._ctx.state !== 'running') {
+            feedback._ctx.resume().catch(() => {});
+        }
+    });
 }
