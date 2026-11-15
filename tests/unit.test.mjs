@@ -639,4 +639,211 @@ test('WebNarrator: prepare, speak, stop, subscriptions and iOS gesture listener'
     }
 });
 
+test('WebNarrator: slow startup (>450ms), chunking long text, voice scoring, error fallback & Safari cancel retry', async () => {
+    const prevWin = globalThis.window;
+    const prevDoc = globalThis.document;
+    const spoken = [];
+    let cancels = 0;
 
+    class MockUtterance {
+        constructor(text) {
+            this.text = text;
+            this.lang = '';
+            this.voice = null;
+            this.volume = 1;
+            this.rate = 1;
+            this.pitch = 1;
+            this.onstart = null;
+            this.onboundary = null;
+            this.onend = null;
+            this.onerror = null;
+        }
+    }
+
+    let speakMode = 'slow';
+    const localFr = { lang: 'fr-FR', name: 'Thomas (Enhanced)', voiceURI: 'com.apple.voice.enhanced.fr-FR.Thomas', localService: true, default: false };
+    const googleCloud = { lang: 'fr-FR', name: 'Google français', voiceURI: 'Google français', localService: false, default: true };
+    const siriVoice = { lang: 'fr-FR', name: 'Siri Voix 1', voiceURI: 'com.apple.ttsbundle.siri', localService: true, default: false };
+    const noveltyVoice = { lang: 'fr-FR', name: 'Jacques', voiceURI: 'com.apple.eloquence.fr-FR.Jacques', localService: true, default: false };
+
+    const mockSynth = {
+        speaking: false,
+        pending: false,
+        paused: false,
+        getVoices: () => [googleCloud, siriVoice, noveltyVoice, localFr],
+        speak(u) {
+            spoken.push(u);
+            if (u.text === ' ') {
+                queueMicrotask(() => u.onend?.());
+                return;
+            }
+            if (speakMode === 'voiceError' && u.voice !== null) {
+                queueMicrotask(() => u.onerror?.({ error: 'synthesis-failed' }));
+                return;
+            }
+            if (speakMode === 'dropOnce' && cancels > 0) {
+                // Simulate Safari < 27 dropping first queued utterance after cancel(); switch back on retry.
+                speakMode = 'instantSuccess';
+                return;
+            }
+            if (speakMode === 'instantSuccess' || (speakMode === 'voiceError' && u.voice === null)) {
+                this.speaking = true;
+                setTimeout(() => {
+                    u.onstart?.();
+                    setTimeout(() => {
+                        this.speaking = false;
+                        u.onend?.();
+                    }, 30);
+                }, 10);
+            }
+        },
+        cancel() {
+            cancels += 1;
+            this.speaking = false;
+            this.pending = false;
+        },
+        resume() {},
+        addEventListener() {},
+    };
+
+    globalThis.window = {
+        SpeechSynthesisUtterance: MockUtterance,
+        speechSynthesis: mockSynth,
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    globalThis.document = { visibilityState: 'visible', addEventListener() {} };
+
+    try {
+        const { narrator } = await import('../src/ui/narrator.js?resilience=1');
+        narrator.prepare();
+
+        // Offline local fr-FR voice must strictly outscore Google cloud, Siri, and Eloquence novelty voices.
+        assert.ok(narrator._scoreVoice(localFr) > narrator._scoreVoice(googleCloud));
+        assert.ok(narrator._scoreVoice(localFr) > narrator._scoreVoice(siriVoice));
+        assert.ok(narrator._scoreVoice(localFr) > narrator._scoreVoice(noveltyVoice));
+
+        // Non-empty silent unlock gesture for iOS Safari
+        assert.equal(narrator.unlock(true), true);
+        const unlockU = spoken.pop();
+        assert.equal(unlockU.text, ' ');
+        assert.equal(unlockU.volume, 0);
+        assert.equal(unlockU.lang, 'fr-FR');
+
+        // 1) Slow cold startup (750ms before speaking = true / onstart) must NOT be aborted at 450ms!
+        speakMode = 'slow';
+        narrator.speak('Grand roque et attaque sur le centre');
+        const waitIdle = narrator.awaitIdle();
+        await new Promise((r) => setTimeout(r, 750));
+        assert.equal(narrator.speaking, true, 'TTS still starting at 750ms must not be killed early');
+        mockSynth.speaking = true;
+        spoken[spoken.length - 1].onstart();
+        await new Promise((r) => setTimeout(r, 60));
+        mockSynth.speaking = false;
+        spoken[spoken.length - 1].onend();
+        const slowRes = await waitIdle;
+        assert.equal(slowRes.played, true);
+        assert.equal(slowRes.started, true);
+
+        // 2) Long lesson text splits cleanly at sentence boundaries and waits for the last chunk
+        spoken.length = 0;
+        const longText = "Première phrase complète d'introduction sur le contrôle du centre. "
+            + "Deuxième phrase expliquant pourquoi le cavalier se développe vers f3 en attaquant e5. "
+            + "Troisième phrase concluant sur la mise en sécurité du roi par le petit roque.";
+        speakMode = 'slow';
+        narrator.speak(longText);
+        assert.ok(spoken.length >= 2, `Expected >=2 chunks, got ${spoken.length}`);
+        assert.ok(spoken.every((u) => u.text.length <= 180));
+        mockSynth.speaking = true;
+        spoken[0].onstart();
+        spoken[0].onend();
+        assert.equal(narrator.speaking, true, 'Must remain speaking until final chunk finishes');
+        mockSynth.speaking = false;
+        spoken[spoken.length - 1].onend();
+        assert.equal(narrator.speaking, false);
+
+        // 3) Explicit voice rejection automatically retries with u.voice = null and succeeds
+        spoken.length = 0;
+        speakMode = 'voiceError';
+        narrator.speak('Coup de développement');
+        const voiceRetryRes = await narrator.awaitIdle();
+        assert.equal(voiceRetryRes.played, true);
+        assert.ok(spoken.length >= 2);
+        assert.equal(spoken[spoken.length - 1].voice, null);
+        assert.equal(spoken[spoken.length - 1].lang, 'fr-FR');
+
+        // 4) Pre-Safari-27 cancel() + speak() drop watchdog automatically retries once
+        spoken.length = 0;
+        cancels = 0;
+        mockSynth.speaking = true;
+        speakMode = 'dropOnce';
+        narrator.speak('Interruption propre');
+        const cancelRetryRes = await narrator.awaitIdle();
+        assert.equal(cancelRetryRes.played, true);
+        assert.ok(cancels >= 1);
+        assert.ok(spoken.length >= 2, 'Watchdog should re-queue dropped utterance after cancel');
+
+        // 5) Total silent failure resolves { played: false } after startup grace
+        spoken.length = 0;
+        mockSynth.speaking = false;
+        mockSynth.pending = false;
+        speakMode = 'silentDrop';
+        narrator.speak('Aucun moteur actif');
+        const silentRes = await narrator.awaitIdle(4000);
+        assert.equal(silentRes.played, false);
+        assert.equal(narrator.speaking, false);
+    } finally {
+        if (prevWin === undefined) delete globalThis.window;
+        else globalThis.window = prevWin;
+        if (prevDoc === undefined) delete globalThis.document;
+        else globalThis.document = prevDoc;
+    }
+});
+
+test('Academy: academyStepDelayMs waits post-speech pause or readable fallback when TTS fails', async () => {
+    const prevWin = globalThis.window;
+    const prevDoc = globalThis.document;
+    globalThis.window = {};
+    globalThis.document = { visibilityState: 'visible', addEventListener() {} };
+    try {
+        const { academyStepDelayMs, POST_SPEECH_PAUSE_MS } = await import('../src/features/academy.js');
+        const sampleLesson = {
+            title: 'Le clouage absolu',
+            summary: 'Une pièce clouée devant son roi ne peut pas bouger.',
+            line: { size: 4 },
+            texts: [
+                'Le fou attaque le cavalier qui protège le roi noir sur la diagonale.',
+                'Court.',
+                'Un commentaire beaucoup plus long expliquant toute la tactique qui suit avec précision et calme.',
+                'Dernier coup.',
+            ],
+        };
+
+        assert.equal(academyStepDelayMs(sampleLesson, 0, { narrationActive: false }), 700);
+        assert.equal(academyStepDelayMs(sampleLesson, 1, { narrationActive: false }), 2600);
+
+        assert.equal(
+            academyStepDelayMs(sampleLesson, 1, { narrationActive: true, speechResult: { played: true, elapsedMs: 4200 } }),
+            POST_SPEECH_PAUSE_MS,
+        );
+
+        // When TTS failed cleanly right away (elapsed 20ms), fallback must NOT race at 600ms
+        const fallbackImmediate = academyStepDelayMs(sampleLesson, 1, {
+            narrationActive: true,
+            speechResult: { played: false, elapsedMs: 20 },
+        });
+        assert.ok(fallbackImmediate >= 3000, `Expected readable fallback >=3000ms, got ${fallbackImmediate}`);
+
+        // Even after startup grace elapsed (2200ms), long steps keep readable buffer >= 900ms
+        const fallbackLongAfterGrace = academyStepDelayMs(sampleLesson, 3, {
+            narrationActive: true,
+            speechResult: { played: false, elapsedMs: 2200 },
+        });
+        assert.ok(fallbackLongAfterGrace >= 2500, `Expected remaining reading time >=2500ms, got ${fallbackLongAfterGrace}`);
+    } finally {
+        if (prevWin === undefined) delete globalThis.window;
+        else globalThis.window = prevWin;
+        if (prevDoc === undefined) delete globalThis.document;
+        else globalThis.document = prevDoc;
+    }
+});

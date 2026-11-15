@@ -261,8 +261,12 @@ export function openSettingsSheet() {
         description: "Lit à voix haute les coups et les explications du mode Guidé de l'Académie.",
         checked: prefs.current.narration,
         onChange: (v) => {
-            if (v) narrator.prepare();
-            else narrator.stop();
+            if (v) {
+                narrator.prepare();
+                narrator.unlock(true);
+            } else {
+                narrator.stop();
+            }
             prefs.setNarration(v);
         },
     });

@@ -13,8 +13,24 @@ import { LinePlaybackController, moveAnim } from '../ui/line-playback.js';
 import { narrator } from '../ui/narrator.js';
 import { openLessonCatalog } from './lesson-catalog.js';
 
+export const POST_SPEECH_PAUSE_MS = 850;
+
 export function moveLabel(fullmove, white, san) {
     return white ? `${fullmove}. ${san}` : `${fullmove}… ${san}`;
+}
+
+export function academyStepDelayMs(lesson, cursor, { narrationActive = false, speechResult = null } = {}) {
+    const c = Math.max(0, Math.min(lesson?.line?.size ?? 0, cursor || 0));
+    if (!narrationActive) return c === 0 ? 700 : 2600;
+    if (speechResult?.played) return POST_SPEECH_PAUSE_MS;
+
+    // Secours si la synthèse vocale n'a pas parlé (bloquée, muette ou absente sur l'appareil) :
+    // on laisse un temps de lecture proportionnel au texte plutôt que 600 ms.
+    const rawText = c === 0 ? `${lesson?.title || ''}. ${lesson?.summary || ''}` : (lesson?.texts?.[c - 1] || '');
+    const textLen = rawText.trim().length;
+    const targetMs = Math.max(c === 0 ? 3200 : 3000, Math.min(8500, 1400 + textLen * 48));
+    const waitedMs = Math.max(0, speechResult?.elapsedMs || 0);
+    return Math.max(900, targetMs - waitedMs);
 }
 
 export class AcademyFeature {
@@ -308,16 +324,25 @@ export class AcademyFeature {
         const l = this.lesson;
         if (!l) return;
         this.playback.cancel();
-        if (this.state.cursor >= l.line.size) this.goTo(0);
-        else this.narrate();
         this.state.playing = true;
-        this._render();
+        if (this.state.cursor >= l.line.size && this.state.cursor > 0) this.goTo(0);
+        else {
+            this.narrate();
+            this._render();
+        }
+        let stepResult = null;
+        const useNarration = () => Boolean(prefs.current.narration && this._voiceAvailable !== false);
         this.playback.autoplay({
-            cursor: () => this.state.cursor,
+            cursor: () => (this._destroyed ? null : this.state.cursor),
             size: () => l.line.size,
-            delayFor: (c) => ((prefs.current.narration && this._voiceAvailable !== false) ? 600 : (c === 0 ? 700 : 2600)),
+            delayFor: (c) => academyStepDelayMs(l, c, {
+                narrationActive: useNarration(),
+                speechResult: stepResult,
+            }),
             checkBeforeDelay: true,
-            awaitReady: () => ((prefs.current.narration && this._voiceAvailable !== false) ? narrator.awaitIdle() : Promise.resolve()),
+            awaitReady: async () => {
+                stepResult = useNarration() ? await narrator.awaitIdle() : null;
+            },
             advance: (t) => this.goTo(t),
             onEnd: () => {
                 if (this._destroyed) return;
