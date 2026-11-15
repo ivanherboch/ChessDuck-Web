@@ -2,7 +2,7 @@
 <html lang="fr" data-theme="night">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <meta name="color-scheme" content="dark light">
     <meta name="description" content="ChessDuck — Notation FIDE, Académie en 113 leçons, 150 000 problèmes Lichess, Jeu Libre avec Stockfish 19 Lite WASM et Mode Enfant, 100 % hors-ligne.">
     <meta name="theme-color" content="#0F172A">
@@ -32,7 +32,20 @@
                 var root = document.documentElement;
                 var ua = navigator.userAgent || '';
                 var isIos = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
-                if (isIos) root.classList.add('is-ios');
+                var standalone = Boolean(window.navigator && window.navigator.standalone)
+                    || Boolean(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+                if (isIos) {
+                    root.classList.add('is-ios');
+                    if (standalone) {
+                        var vp = document.querySelector('meta[name="viewport"]');
+                        if (vp) {
+                            var content = vp.getAttribute('content') || '';
+                            if (!/viewport-fit=/i.test(content)) {
+                                vp.setAttribute('content', content + ', viewport-fit=cover');
+                            }
+                        }
+                    }
+                }
                 root.dataset.theme = kid ? 'kid' : (dark ? 'night' : 'day');
                 root.style.colorScheme = (kid || !dark) ? 'light' : 'dark';
                 root.style.setProperty('--bg', bg);

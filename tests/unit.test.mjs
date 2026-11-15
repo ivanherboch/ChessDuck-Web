@@ -1177,12 +1177,29 @@ test('v2.4.5: resumePoint and WebNarrator pause/resume at interrupted sentence s
     });
 });
 
-test('iPhone top-blur mitigation: status-bar meta, isIosDevice & computeIosTopGap matrix', async () => {
+test('iPhone top-blur mitigation: status-bar meta, syncIosViewportMeta, isIosDevice & computeIosTopGap matrix', async () => {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     assert.match(html, /<meta\s+name="apple-mobile-web-app-status-bar-style"\s+content="default">/);
     assert.equal(/black-translucent/.test(html), false);
+    const vpMeta = html.match(/<meta\s+name="viewport"[^>]*>/i)?.[0] || '';
+    assert.ok(vpMeta.length > 0);
+    assert.equal(/viewport-fit=cover/i.test(vpMeta), false, 'Static viewport meta must omit viewport-fit=cover for Safari');
+    assert.match(html, /if\s*\(standalone\)\s*\{[\s\S]*viewport-fit=cover/);
 
-    const { isIosDevice, computeIosTopGap } = await import('../src/ui/theme.js');
+    const { isIosDevice, computeIosTopGap, syncIosViewportMeta } = await import('../src/ui/theme.js');
+
+    let vpAttr = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+    const fakeMeta = {
+        getAttribute: (name) => (name === 'content' ? vpAttr : null),
+        setAttribute: (name, val) => { if (name === 'content') vpAttr = val; },
+    };
+    const fakeDoc = { querySelector: (sel) => (sel === 'meta[name="viewport"]' ? fakeMeta : null) };
+    syncIosViewportMeta(true, fakeDoc);
+    assert.match(vpAttr, /\bviewport-fit=cover\b/);
+    syncIosViewportMeta(true, fakeDoc);
+    assert.equal(vpAttr.match(/viewport-fit=cover/g)?.length, 1);
+    syncIosViewportMeta(false, fakeDoc);
+    assert.equal(/viewport-fit=/i.test(vpAttr), false);
 
     assert.equal(isIosDevice({ userAgent: IOS_SAFARI_UA, platform: 'iPhone', maxTouchPoints: 5 }), true);
     assert.equal(isIosDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', platform: 'MacIntel', maxTouchPoints: 5 }), true);
@@ -1195,7 +1212,9 @@ test('iPhone top-blur mitigation: status-bar meta, isIosDevice & computeIosTopGa
     assert.equal(computeIosTopGap({ isIos: false, standalone: true, innerWidth: 390, innerHeight: 844, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 0);
 
     // iPhone Safari (portrait)
-    assert.equal(computeIosTopGap({ isIos: true, standalone: false, innerWidth: 390, innerHeight: 664, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 20);
+    assert.equal(computeIosTopGap({ isIos: true, standalone: false, innerWidth: 390, innerHeight: 664, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 32);
+    assert.equal(computeIosTopGap({ isIos: true, standalone: false, innerWidth: 390, innerHeight: 664, screenWidth: 390, screenHeight: 844, safeTop: 44 }), 38);
+    assert.equal(computeIosTopGap({ isIos: true, standalone: false, innerWidth: 393, innerHeight: 659, screenWidth: 393, screenHeight: 852, safeTop: 59 }), 47);
 
     // iPhone fresh `default` PWA (OS already reserved status bar so innerHeight < screenHeight)
     assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 390, innerHeight: 790, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 20);
@@ -1244,7 +1263,7 @@ test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', 
     assert.match(settingsSrc, /Voix en mode enfant/);
 });
 
-test('v2.5.1: version bump & Notation FIDE keyboard WCAG target dimensions', async () => {
+test('v2.5.1: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
     const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
@@ -1253,16 +1272,17 @@ test('v2.5.1: version bump & Notation FIDE keyboard WCAG target dimensions', asy
     assert.match(swSrc, /chessduck-v2\.5\.1-/);
     assert.match(settingsSrc, /v2\.5\.1/);
     assert.match(cssSrc, /v2\.5\.1/);
-    assert.match(notationSrc, /bottomMin:\s*298/);
+    assert.match(notationSrc, /bottomMin:\s*244/);
 
-    assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*48px/);
-    assert.match(cssSrc, /\.notation-bs-btn\s*\{[^}]*width:\s*48px;[^}]*height:\s*48px/);
-    assert.match(cssSrc, /\.notation-validate-btn\s*\{[^}]*min-height:\s*48px/);
+    assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*40px/);
+    assert.match(cssSrc, /\.notation-input-box\s+\.duck-icon-btn\s*\{[^}]*width:\s*38px;[^}]*height:\s*38px/);
+    assert.match(cssSrc, /\.notation-bs-btn\s*\{[^}]*width:\s*40px;[^}]*height:\s*40px/);
+    assert.match(cssSrc, /\.notation-validate-btn\s*\{[^}]*min-height:\s*40px/);
     assert.match(cssSrc, /\.fide-row\.fide-row-compact\s*\{[^}]*gap:\s*3px/);
-    assert.match(cssSrc, /\.fide-key\s*\{[^}]*height:\s*44px/);
-    assert.match(cssSrc, /\.fide-key\.is-piece\s*\{[^}]*height:\s*52px/);
-    assert.match(cssSrc, /\.fide-key\.is-piece \.fide-key-main\s*\{[^}]*line-height:\s*19px/);
-    assert.match(cssSrc, /\.fide-key-sub,\s*[\s\S]*line-height:\s*12px|\.fide-key-sub\s*\{[^}]*line-height:\s*12px/);
+    assert.match(cssSrc, /\.fide-key\s*\{[^}]*height:\s*34px/);
+    assert.match(cssSrc, /\.fide-key\.is-piece\s*\{[^}]*height:\s*43px/);
+    assert.match(cssSrc, /\.fide-key\.is-piece \.fide-key-main\s*\{[^}]*line-height:\s*16px/);
+    assert.match(cssSrc, /\.fide-key-sub\s*\{[^}]*line-height:\s*10\.5px/);
 });
 
 test('v2.4.7: KidMode demoPhases written for oral speech & clean through SpokenFr', async () => {
@@ -1869,4 +1889,202 @@ test('v2.5.1: CSS & Web safeguards (iOS blur/gap, board drag/a11y/promo, audio &
     assert.match(cssSrc, /\.history-card\s*\{[^}]*cursor:\s*pointer/);
     assert.match(fbSrc, /MOVE_GAIN\s*=\s*0\.65/);
     assert.match(playSrc, /openReview\([^)]*\)\s*\{[\s\S]*playing:\s*false/);
+});
+
+test('PuzzlesFeature: setBand, setFilter & early _render immediately update top-left catalog badge', async () => {
+    const prevWin = globalThis.window;
+    const store = new Map();
+    globalThis.window = {
+        localStorage: {
+            getItem: (k) => (store.has(k) ? store.get(k) : null),
+            setItem: (k, v) => { store.set(k, v); },
+        },
+    };
+    try {
+        const { prefs } = await import('../src/data/prefs.js');
+        const { PuzzlesFeature } = await import('../src/features/puzzles.js');
+        prefs.setPuzzleFilter(0, '');
+
+        const lbl = { textContent: '' };
+        const attrs = new Map();
+        const mockBtn = {
+            querySelector: (sel) => (sel === '.duck-btn-label' ? lbl : null),
+            setAttribute: (k, v) => attrs.set(k, v),
+            getAttribute: (k) => attrs.get(k) ?? null,
+        };
+        let randomCalls = 0;
+        const fakeFeat = Object.create(PuzzlesFeature.prototype);
+        fakeFeat.state = {
+            puzzle: null,
+            line: null,
+            empty: false,
+            band: prefs.current.puzzleBand,
+            theme: prefs.current.puzzleTheme,
+        };
+        fakeFeat.solvedIds = new Set(['p1', 'p2', 'p3']);
+        fakeFeat.catalogBtn = mockBtn;
+        fakeFeat._destroyed = false;
+        fakeFeat._ensureVisible = () => {};
+        fakeFeat.random = () => { randomCalls += 1; };
+
+        fakeFeat._updateCatalogButton();
+        assert.equal(lbl.textContent, 'Libre · 3 résolus');
+        assert.match(attrs.get('aria-label') || '', /Libre · 3 résolus, 3 résolus sur 150 000/);
+
+        // Selecting a difficulty immediately updates top-left button label & persists in prefs
+        fakeFeat.setBand(2);
+        assert.equal(prefs.current.puzzleBand, 2);
+        assert.equal(lbl.textContent, 'Intermédiaire · Tous les thèmes');
+        assert.match(attrs.get('aria-label') || '', /Intermédiaire · Tous les thèmes/);
+
+        // Early _render before puzzle finishes loading must still keep the button synchronized
+        fakeFeat.state.band = 1;
+        fakeFeat._render();
+        assert.equal(lbl.textContent, 'Débutant · Tous les thèmes');
+
+        // Selecting both difficulty + theme updates immediately and triggers random()
+        fakeFeat.setFilter(3, 'fork');
+        assert.equal(prefs.current.puzzleBand, 3);
+        assert.equal(prefs.current.puzzleTheme, 'fork');
+        assert.equal(randomCalls, 1);
+        assert.equal(lbl.textContent, 'Avancé · Fourchette');
+
+        // Resetting back to Libre + Tous les thèmes restores solved count badge
+        fakeFeat.setFilter(0, '');
+        assert.equal(lbl.textContent, 'Libre · 3 résolus');
+    } finally {
+        if (prevWin === undefined) delete globalThis.window;
+        else globalThis.window = prevWin;
+    }
+});
+
+test('WebNarrator regressions: Android fallback cold start without idle cancel & iOS pause/stop unlock preservation', async () => {
+    class MockUtterance {
+        constructor(text) {
+            this.text = text;
+            this.lang = '';
+            this.voice = null;
+            this.volume = 1;
+            this.rate = 1;
+            this.pitch = 1;
+            this.onstart = null;
+            this.onboundary = null;
+            this.onend = null;
+            this.onerror = null;
+        }
+    }
+
+    // 1) Android Chrome: candidate 0 (voice=null) fast onerror does NOT call idle synth.cancel(),
+    //    and candidate 1 explicit local voice with 1000ms cold start (!speaking && !pending) completes cleanly.
+    {
+        const spoken = [];
+        let cancels = 0;
+        const localVoice = { lang: 'fr-FR', name: 'fr-fr-x-frd-local', voiceURI: 'fr-fr-x-frd-local', localService: true, default: false };
+
+        const mockSynth = {
+            speaking: false,
+            pending: false,
+            paused: false,
+            getVoices: () => [localVoice],
+            resume() { this.paused = false; },
+            cancel() { cancels += 1; this.speaking = false; this.pending = false; },
+            speak(u) {
+                spoken.push(u);
+                if (u.voice === null) {
+                    queueMicrotask(() => u.onerror?.({ error: 'language-unavailable' }));
+                }
+            },
+            addEventListener() {},
+        };
+
+        await withMockBrowserEnv({
+            ua: CHROME_ANDROID_UA,
+            win: { SpeechSynthesisUtterance: MockUtterance, speechSynthesis: mockSynth, addEventListener() {}, removeEventListener() {} },
+            doc: { visibilityState: 'visible', addEventListener() {} },
+        }, async () => {
+            const { narrator } = await import('../src/ui/narrator.js?reg_android=1');
+            try {
+                narrator.prepare();
+                narrator.speak('Le cavalier saute en f3.');
+                const waitRes = narrator.awaitIdle(4000);
+
+                // Candidate 0 errored immediately while idle; retryAlternateVoice should switch to candidate 1 without cancel()
+                await new Promise((r) => setTimeout(r, 1000));
+                assert.equal(cancels, 0, 'Must NOT call synth.cancel() when switching from an already-idle errored candidate');
+                assert.equal(narrator.speaking, true, 'Fallback candidate 1 must NOT be aborted at 550ms/750ms during 1000ms cold start');
+                assert.equal(spoken.length, 2);
+                assert.equal(spoken[1].voice, localVoice);
+
+                mockSynth.speaking = true;
+                spoken[1].onstart?.();
+                await new Promise((r) => setTimeout(r, 40));
+                mockSynth.speaking = false;
+                spoken[1].onend?.();
+                const res = await waitRes;
+                assert.equal(res.played, true);
+                assert.equal(res.started, true);
+            } finally {
+                narrator.stop();
+            }
+        });
+    }
+
+    // 2) iOS Safari: pause()/stop() preserves _unlocked, does NOT re-arm window click listener,
+    //    and simulated click handler does NOT queue spurious muted ' ' utterance.
+    {
+        const listeners = new Map();
+        const spoken = [];
+        const mockSynth = {
+            speaking: false,
+            pending: false,
+            paused: false,
+            getVoices: () => [{ lang: 'fr-FR', name: 'Amélie', localService: true, default: true }],
+            resume() {},
+            cancel() { this.speaking = false; this.pending = false; },
+            speak(u) {
+                spoken.push(u);
+                if (u.text === ' ') {
+                    queueMicrotask(() => u.onend?.());
+                    return;
+                }
+                this.speaking = true;
+            },
+            addEventListener() {},
+        };
+
+        await withMockBrowserEnv({
+            ua: IOS_SAFARI_UA,
+            win: {
+                SpeechSynthesisUtterance: MockUtterance,
+                speechSynthesis: mockSynth,
+                addEventListener: (t, fn) => listeners.set(t, fn),
+                removeEventListener: (t) => listeners.delete(t),
+            },
+            doc: { visibilityState: 'visible', addEventListener() {} },
+        }, async () => {
+            const { narrator } = await import('../src/ui/narrator.js?reg_ios=1');
+            try {
+                assert.ok(listeners.has('click'));
+                narrator.unlock(true);
+                assert.equal(listeners.has('click'), false);
+
+                spoken.length = 0;
+                narrator.speak('Première phrase claire. Deuxième phrase.');
+                spoken[0].onstart?.();
+                narrator.pause();
+                assert.equal(listeners.has('click'), false, 'pause() must NOT re-arm iOS gesture click listener');
+
+                // Simulated click bubble must NOT emit spurious silent ' ' utterance after pause()
+                narrator._onGesture();
+                assert.equal(spoken.some((u) => u.text === ' '), false);
+
+                narrator.stop();
+                assert.equal(listeners.has('click'), false, 'stop() must NOT re-arm iOS gesture click listener');
+                narrator._onGesture();
+                assert.equal(spoken.some((u) => u.text === ' '), false);
+            } finally {
+                narrator.stop();
+            }
+        });
+    }
 });

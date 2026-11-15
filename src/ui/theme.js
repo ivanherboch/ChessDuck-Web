@@ -277,6 +277,17 @@ export function isIosDevice(nav = typeof navigator !== 'undefined' ? navigator :
     return nav.platform === 'MacIntel' && (nav.maxTouchPoints || 0) > 1;
 }
 
+export function syncIosViewportMeta(standalone, doc = typeof document !== 'undefined' ? document : null) {
+    const vp = doc?.querySelector?.('meta[name="viewport"]');
+    if (!vp) return;
+    const parts = (vp.getAttribute('content') || '')
+        .split(',')
+        .map((p) => p.trim())
+        .filter((p) => p && !/^viewport-fit=/i.test(p));
+    if (standalone) parts.push('viewport-fit=cover');
+    vp.setAttribute('content', parts.join(', '));
+}
+
 export function computeIosTopGap({
     isIos = false,
     standalone = false,
@@ -303,7 +314,7 @@ export function computeIosTopGap({
         }
         return 20;
     }
-    return safeTop > 0 ? 28 : 20;
+    return safeTop > 0 ? Math.max(36, Math.round(safeTop * 0.6) + 12) : 32;
 }
 
 export function isDarkTheme(themeMode) {

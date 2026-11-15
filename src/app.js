@@ -10,7 +10,9 @@ import { openSettingsSheet } from './features/settings-sheet.js';
 import { duckIconButton, el } from './ui/common.js';
 import { feedback } from './ui/feedback.js';
 import { createIcon } from './ui/icons.js';
-import { KidColors, applyThemeToDom, computeIosTopGap, isIosDevice, isTwoPane, resolvePalette } from './ui/theme.js';
+import {
+    KidColors, applyThemeToDom, computeIosTopGap, isIosDevice, isTwoPane, resolvePalette, syncIosViewportMeta,
+} from './ui/theme.js';
 
 const TABS = [
     { label: 'Notation', icon: 'KeyboardOutlined', selectedIcon: 'Keyboard' },
@@ -123,6 +125,7 @@ class ChessDuckApp {
         if (this._isIos) {
             const standalone = Boolean(window.navigator?.standalone)
                 || Boolean(window.matchMedia?.('(display-mode: standalone)').matches);
+            syncIosViewportMeta(standalone);
             const safeTop = this._measureSafeTop();
             const topGap = computeIosTopGap({
                 isIos: true,
@@ -248,7 +251,9 @@ class ChessDuckApp {
         }
 
         if (st.kidMode) {
-            for (const f of this.features) f?.onDeactivate?.();
+            if (!this._wasKid) {
+                for (const f of this.features) f?.onDeactivate?.();
+            }
             if (!this.kidFeature) {
                 this.kidFeature = new KidFeature();
                 this.kidShell.appendChild(this.kidFeature.el);

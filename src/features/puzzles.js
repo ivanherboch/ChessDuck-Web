@@ -71,6 +71,7 @@ export class PuzzlesFeature {
         this._unsubSolved = db.subscribeSolvedIds((s) => {
             if (this._destroyed) return;
             this.solvedIds = new Set(s);
+            this._updateCatalogButton();
             this._render();
         });
         this._lastRecentsKey = '';
@@ -91,6 +92,7 @@ export class PuzzlesFeature {
         const st = prefs.current;
         this.state.band = st.puzzleBand;
         this.state.theme = st.puzzleTheme;
+        this._updateCatalogButton();
         await db.initUserState();
         if (this._destroyed) return;
         const id = st.puzzleId;
@@ -146,14 +148,26 @@ export class PuzzlesFeature {
         return this.state.line?.positions[1]?.whiteToMove ?? true;
     }
 
+    _updateCatalogButton() {
+        if (!this.catalogBtn) return;
+        const filter = filterLabel(this.state.band, this.state.theme, this.solvedIds.size);
+        const lbl = this.catalogBtn.querySelector('.duck-btn-label');
+        if (lbl) lbl.textContent = filter;
+        this.catalogBtn.setAttribute(
+            'aria-label',
+            `Catalogue des problèmes : ${filter}, ${formatFr(this.solvedIds.size)} résolus sur ${formatFr(PUZZLE_COUNT)}`,
+        );
+    }
+
     _buildDom() {
         this.topBar = el('div', 'top-bar');
         this.catalogBtn = duckButton({
-            label: filterLabel(this.state.band, this.state.theme, 0),
+            label: filterLabel(this.state.band, this.state.theme, this.solvedIds.size),
             icon: 'Extension',
             accent: 'blue',
             onClick: () => this._openCatalog(),
         });
+        this._updateCatalogButton();
         this.catalogBtn.style.flex = '1';
         this.randomBtn = duckIconButton({ icon: 'Casino', ariaLabel: 'Problème aléatoire', accent: 'gold', onClick: () => this.random() });
         this.historyBtn = duckIconButton({ icon: 'History', ariaLabel: 'Problèmes récents', enabled: false, onClick: () => this._openRecentSheet() });
@@ -346,12 +360,14 @@ export class PuzzlesFeature {
     setBand(band) {
         this.state.band = band;
         prefs.setPuzzleFilter(band, this.state.theme);
+        this._updateCatalogButton();
     }
 
     setFilter(band, theme) {
         this.state.band = band;
         this.state.theme = theme;
         prefs.setPuzzleFilter(band, theme);
+        this._updateCatalogButton();
         this.random();
     }
 
@@ -657,6 +673,7 @@ export class PuzzlesFeature {
 
     _render() {
         if (this._destroyed) return;
+        this._updateCatalogButton();
         const s = this.state;
         this._ensureVisible();
         const p = s.puzzle;
@@ -666,12 +683,6 @@ export class PuzzlesFeature {
         const type = PuzzleThemes.primary(p.themes);
         const visible = this.themeVisible;
 
-        const filter = filterLabel(s.band, s.theme, this.solvedIds.size);
-        this.catalogBtn.querySelector('.duck-btn-label').textContent = filter;
-        this.catalogBtn.setAttribute(
-            'aria-label',
-            `Catalogue des problèmes : ${filter}, ${formatFr(this.solvedIds.size)} résolus sur ${formatFr(PUZZLE_COUNT)}`,
-        );
         this.randomBtn.classList.toggle('is-on', s.solved);
         this.historyBtn.disabled = !this.recents.length;
 

@@ -51,7 +51,7 @@
 }
 
 :root.is-ios {
-    --ios-top-gap: 20px;
+    --ios-top-gap: 32px;
 }
 
 [data-theme="day"] {
@@ -1616,12 +1616,17 @@ button.move-strip-item {
     justify-content: flex-start;
 }
 
+.notation-layout .module-bottom {
+    gap: 4px;
+    padding: 3px 8px 4px;
+}
+
 .notation-under-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding-top: 4px;
+    padding-top: 2px;
     gap: 6px;
 }
 
@@ -1636,7 +1641,7 @@ button.move-strip-item {
 .notation-input-box {
     flex: 1 1 0%;
     min-width: 0;
-    height: 48px;
+    height: 40px;
     border-radius: 12px;
     background: var(--surface);
     border: 1px solid var(--outline-strong);
@@ -1651,9 +1656,9 @@ button.move-strip-item {
 }
 
 .notation-input-box .duck-icon-btn {
-    width: 40px;
-    height: 40px;
-    flex: 0 0 40px;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
 }
 
 .notation-clear-spacer {
@@ -1681,9 +1686,9 @@ button.move-strip-item {
 }
 
 .notation-bs-btn {
-    width: 48px;
-    height: 48px;
-    flex: 0 0 48px;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
     border-radius: 12px;
     border: none;
     background: var(--surface-hi);
@@ -1701,22 +1706,22 @@ button.move-strip-item {
 }
 
 .notation-validate-btn {
-    min-height: 48px;
-    padding: 0 14px;
+    min-height: 40px;
+    padding: 0 12px;
 }
 
 .fide-kb {
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 2px 0;
+    gap: 3px;
+    padding: 0;
     width: 100%;
 }
 
 .fide-row {
     display: flex;
-    gap: 4px;
+    gap: 3px;
     width: 100%;
 }
 
@@ -1726,7 +1731,7 @@ button.move-strip-item {
 
 .fide-key {
     min-width: 0;
-    height: 44px;
+    height: 34px;
     border-radius: 10px;
     border: none;
     background: var(--surface-hi);
@@ -1752,19 +1757,19 @@ button.move-strip-item {
 }
 
 .fide-key.is-piece {
-    height: 52px;
+    height: 43px;
 }
 
 .fide-key-main {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
     line-height: 1.15;
     color: inherit;
 }
 
 .fide-key.is-piece .fide-key-main {
-    font-size: 16px;
-    line-height: 19px;
+    font-size: 15px;
+    line-height: 16px;
 }
 
 .fide-key.is-piece:not(:disabled) .fide-key-main {
@@ -1772,9 +1777,9 @@ button.move-strip-item {
 }
 
 .fide-key-sub {
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 500;
-    line-height: 12px;
+    line-height: 10.5px;
     color: var(--muted);
     white-space: nowrap;
     overflow: hidden;
@@ -1783,9 +1788,9 @@ button.move-strip-item {
 }
 
 .fide-key-sub2 {
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 500;
-    line-height: 12px;
+    line-height: 10.5px;
     color: inherit;
     white-space: nowrap;
     overflow: hidden;
@@ -3354,7 +3359,7 @@ button.move-strip-item {
     .fide-key-sub,
     .fide-key-sub2 {
         font-size: 9px;
-        line-height: 11px;
+        line-height: 10px;
     }
     .kid-legend-row {
         gap: 3px;
@@ -3392,8 +3397,8 @@ button.move-strip-item {
 
 @media (max-width: 350px) {
     .notation-bs-btn {
-        width: 42px;
-        flex-basis: 42px;
+        width: 38px;
+        flex-basis: 38px;
     }
 }
 
@@ -3420,41 +3425,55 @@ button.move-strip-item {
         gap: 5px;
         padding: 3px 8px 4px;
     }
+    .notation-layout .module-bottom {
+        gap: 3px;
+        padding: 2px 8px 3px;
+    }
+    .notation-under-row {
+        padding-top: 1px;
+    }
     .feedback-card {
         padding: 6px 10px 6px 12px;
     }
     .fide-kb {
-        gap: 3px;
+        gap: 2.5px;
         padding: 0;
     }
-    .fide-row {
-        gap: 3px;
+    .fide-row,
+    .fide-row.fide-row-compact {
+        gap: 2.5px;
+    }
+    .fide-key {
+        height: 29px;
+        padding: 1.5px 2px;
     }
     .fide-key.is-piece {
-        height: 41px;
+        height: 39px;
     }
     .fide-key.is-piece .fide-key-main {
-        font-size: 15px;
-        line-height: 16px;
+        font-size: 14px;
+        line-height: 15px;
     }
     .fide-key-sub,
     .fide-key-sub2 {
-        font-size: 9px;
-        line-height: 10px;
-    }
-    .fide-key {
-        height: 31px;
+        font-size: 8.5px;
+        line-height: 9.5px;
     }
     .notation-input-box {
-        height: 40px;
+        height: 36px;
+    }
+    .notation-input-box .duck-icon-btn {
+        width: 34px;
+        height: 34px;
+        flex: 0 0 34px;
     }
     .notation-bs-btn {
-        width: 40px;
-        flex-basis: 40px;
-        height: 40px;
+        width: 36px;
+        flex-basis: 36px;
+        height: 36px;
     }
     .notation-validate-btn {
-        min-height: 40px;
+        min-height: 36px;
     }
 }
 
@@ -3508,21 +3527,26 @@ button.move-strip-item {
         padding: 5px 10px 5px 12px;
     }
     .notation-input-box {
-        height: 38px;
+        height: 36px;
+    }
+    .module-layout.is-two-pane .notation-input-box .duck-icon-btn {
+        width: 34px;
+        height: 34px;
+        flex: 0 0 34px;
     }
     .notation-bs-btn {
-        width: 38px;
-        height: 38px;
-        flex-basis: 38px;
+        width: 36px;
+        height: 36px;
+        flex-basis: 36px;
     }
     .notation-validate-btn {
-        min-height: 38px;
-    }
-    .fide-key.is-piece {
-        height: 41px;
+        min-height: 36px;
     }
     .fide-key {
-        height: 28px;
+        height: 27px;
+    }
+    .fide-key.is-piece {
+        height: 38px;
     }
     .duck-seg-btn {
         min-height: 34px;

@@ -7,7 +7,7 @@ const START_GRACE_MS = 2600;
 const VOICE_FALLBACK_MS = 950;
 const APPLE_PRIMARY_FALLBACK_MS = 1350;
 const ANDROID_LANG_FALLBACK_MS = 1750;
-const ALT_VOICE_FALLBACK_MS = 550;
+const ALT_VOICE_FALLBACK_MS = 1100;
 const PENDING_FALLBACK_MS = 1600;
 const LANG_PENDING_FALLBACK_MS = 2400;
 const PENDING_STALL_MS = 7000;
@@ -471,7 +471,7 @@ export class WebNarrator {
             this._spokenAt = 0;
             let cancelled = false;
             try {
-                if (synth.speaking || synth.pending || !fromError) {
+                if (synth.speaking || synth.pending) {
                     this._lastCancelAt = Date.now();
                     synth.cancel();
                     cancelled = true;
@@ -635,7 +635,9 @@ export class WebNarrator {
                 if (isPending) {
                     idlePolls = 0;
                     if (!started && !sawSpeaking) {
-                        const pendFb = voiceCandidate === null ? LANG_PENDING_FALLBACK_MS : PENDING_FALLBACK_MS;
+                        const pendFb = candidateIdx === 0
+                            ? (voiceCandidate === null ? LANG_PENDING_FALLBACK_MS : PENDING_FALLBACK_MS)
+                            : Math.max(PENDING_FALLBACK_MS, voiceCandidate === null ? LANG_PENDING_FALLBACK_MS : ALT_VOICE_FALLBACK_MS + 500);
                         if (elapsed >= pendFb && retryAlternateVoice(false)) {
                             return;
                         }
@@ -655,15 +657,19 @@ export class WebNarrator {
 
                 // Voix silencieusement bloquée (!speaking && !pending) : laisser un démarrage réaliste sur mobile avant repli.
                 if (!started && !sawSpeaking) {
+                    const isLast = candidateIdx + 1 >= candidates.length;
+                    const attemptOffset = totalElapsed - elapsed;
                     const fbMs = candidateIdx === 0
                         ? (voiceCandidate === null ? ANDROID_LANG_FALLBACK_MS : (appleWebKit ? APPLE_PRIMARY_FALLBACK_MS : VOICE_FALLBACK_MS))
-                        : ALT_VOICE_FALLBACK_MS;
-                    if (elapsed >= fbMs && retryAlternateVoice(false)) {
+                        : (voiceCandidate === null ? START_GRACE_MS : (attemptOffset < 500 ? 1500 : ALT_VOICE_FALLBACK_MS));
+                    if (!isLast && elapsed >= fbMs && retryAlternateVoice(false)) {
                         return;
                     }
                     const graceMs = candidateIdx === 0
                         ? (voiceCandidate === null ? START_GRACE_MS : (appleWebKit ? APPLE_PRIMARY_FALLBACK_MS + 100 : START_GRACE_MS))
-                        : 750;
+                        : (voiceCandidate === null
+                            ? Math.min(START_GRACE_MS, Math.max(1200, 3600 - attemptOffset))
+                            : (attemptOffset < 500 ? Math.max(1800, ALT_VOICE_FALLBACK_MS + 500) : Math.max(1400, ALT_VOICE_FALLBACK_MS + 300)));
                     if (elapsed >= graceMs) {
                         finish(false);
                     }
@@ -739,10 +745,6 @@ export class WebNarrator {
             if (wasActive || busy) {
                 this._lastCancelAt = Date.now();
                 try { synth.cancel(); } catch { /* ignore */ }
-                if (this._isAppleWebKit()) {
-                    this._unlocked = false;
-                    this._armGestureUnlock();
-                }
             }
         }
     }
