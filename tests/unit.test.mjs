@@ -1177,3 +1177,42 @@ test('v2.4.5: resumePoint and WebNarrator pause/resume at interrupted sentence s
     });
 });
 
+test('iPhone top-blur mitigation: status-bar meta, isIosDevice & computeIosTopGap matrix', async () => {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    assert.match(html, /<meta\s+name="apple-mobile-web-app-status-bar-style"\s+content="default">/);
+    assert.equal(/black-translucent/.test(html), false);
+
+    const { isIosDevice, computeIosTopGap } = await import('../src/ui/theme.js');
+
+    assert.equal(isIosDevice({ userAgent: IOS_SAFARI_UA, platform: 'iPhone', maxTouchPoints: 5 }), true);
+    assert.equal(isIosDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', platform: 'MacIntel', maxTouchPoints: 5 }), true);
+    assert.equal(isIosDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', platform: 'MacIntel', maxTouchPoints: 0 }), false);
+    assert.equal(isIosDevice({ userAgent: CHROME_ANDROID_UA, platform: 'Linux armv8l', maxTouchPoints: 5 }), false);
+    assert.equal(isIosDevice({ userAgent: SAMSUNG_ANDROID_UA, platform: 'Linux armv8l', maxTouchPoints: 5 }), false);
+    assert.equal(isIosDevice({ userAgent: CHROME_DESKTOP_UA, platform: 'Linux x86_64', maxTouchPoints: 0 }), false);
+
+    // Non-iOS must stay untouched (0px)
+    assert.equal(computeIosTopGap({ isIos: false, standalone: true, innerWidth: 390, innerHeight: 844, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 0);
+
+    // iPhone Safari (portrait)
+    assert.equal(computeIosTopGap({ isIos: true, standalone: false, innerWidth: 390, innerHeight: 664, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 20);
+
+    // iPhone fresh `default` PWA (OS already reserved status bar so innerHeight < screenHeight)
+    assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 390, innerHeight: 790, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 20);
+
+    // iPhone cached fullscreen `black-translucent` or iOS 27 PWA under status bar with valid safeTop
+    assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 393, innerHeight: 852, screenWidth: 393, screenHeight: 852, safeTop: 59 }), 40);
+
+    // iPhone cached fullscreen `black-translucent` with WebKit #301994 safeTop=0 bug
+    assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 393, innerHeight: 852, screenWidth: 393, screenHeight: 852, safeTop: 0 }), 99);
+    assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 390, innerHeight: 844, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 87);
+    assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 375, innerHeight: 667, screenWidth: 375, screenHeight: 667, safeTop: 0 }), 60);
+
+    // iPad fullscreen standalone fallback
+    assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 820, innerHeight: 1180, screenWidth: 820, screenHeight: 1180, safeTop: 0 }), 64);
+
+    // Compact iPhone landscape keeps vertical budget tight
+    assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 844, innerHeight: 390, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 8);
+});
+
+

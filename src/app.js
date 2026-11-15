@@ -11,7 +11,7 @@ import { openSettingsSheet } from './features/settings-sheet.js';
 import { duckButton, duckIconButton, el } from './ui/common.js';
 import { feedback } from './ui/feedback.js';
 import { createIcon } from './ui/icons.js';
-import { KidColors, applyThemeToDom, isTwoPane, resolvePalette } from './ui/theme.js';
+import { KidColors, applyThemeToDom, computeIosTopGap, isIosDevice, isTwoPane, resolvePalette } from './ui/theme.js';
 
 const TABS = [
     { label: 'Notation', icon: 'KeyboardOutlined', selectedIcon: 'Keyboard' },
@@ -59,6 +59,9 @@ class ChessDuckApp {
         this.kidFeature = null;
         this._wasKid = prefs.current.kidMode;
         this._palette = resolvePalette(prefs.current);
+        this._isIos = isIosDevice();
+        this._safeProbe = null;
+        document.documentElement.classList.toggle('is-ios', this._isIos);
 
         this._syncViewportMetrics();
         this._buildShell();
@@ -84,12 +87,25 @@ class ChessDuckApp {
         this._onOrientationChange = () => {
             this._onResize();
             requestAnimationFrame(() => this._onResize());
+            setTimeout(() => this._onResize(), 200);
         };
         window.addEventListener('resize', this._onResize);
         window.addEventListener('orientationchange', this._onOrientationChange);
         window.visualViewport?.addEventListener('resize', this._onResize);
 
         db.initUserState().catch(() => {});
+    }
+
+    _measureSafeTop() {
+        if (!this._isIos || typeof document === 'undefined' || !document.body) return 0;
+        if (!this._safeProbe) {
+            const p = document.createElement('div');
+            p.setAttribute('aria-hidden', 'true');
+            p.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top, 0px);';
+            document.body.appendChild(p);
+            this._safeProbe = p;
+        }
+        return parseFloat(getComputedStyle(this._safeProbe).paddingTop) || 0;
     }
 
     _syncViewportMetrics() {
@@ -104,6 +120,23 @@ class ChessDuckApp {
         }
         if (h > 0) {
             document.documentElement.style.setProperty('--app-h', `${h}px`);
+        }
+        if (this._isIos) {
+            const standalone = Boolean(window.navigator?.standalone)
+                || Boolean(window.matchMedia?.('(display-mode: standalone)').matches);
+            const safeTop = this._measureSafeTop();
+            const topGap = computeIosTopGap({
+                isIos: true,
+                standalone,
+                innerWidth: window.innerWidth,
+                innerHeight: window.innerHeight,
+                screenWidth: window.screen?.width || 0,
+                screenHeight: window.screen?.height || 0,
+                safeTop,
+            });
+            document.documentElement.style.setProperty('--ios-top-gap', `${topGap}px`);
+        } else {
+            document.documentElement.style.removeProperty('--ios-top-gap');
         }
     }
 

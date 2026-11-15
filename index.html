@@ -6,8 +6,9 @@
     <meta name="color-scheme" content="dark light">
     <meta name="description" content="ChessDuck — Notation FIDE, Académie en 113 leçons, 150 000 problèmes Lichess, Jeu Libre avec Stockfish 19 Lite WASM et Mode Enfant, 100 % hors-ligne.">
     <meta name="theme-color" content="#0F172A">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="ChessDuck">
     <title>ChessDuck</title>
     <link rel="manifest" href="./manifest.webmanifest">
@@ -29,6 +30,9 @@
                 var bg = kid ? '#EBF6FF' : (dark ? nightBg[pal] : dayBg[pal]);
                 var fg = kid ? '#1F3B57' : (dark ? nightFg[pal] : dayFg[pal]);
                 var root = document.documentElement;
+                var ua = navigator.userAgent || '';
+                var isIos = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+                if (isIos) root.classList.add('is-ios');
                 root.dataset.theme = kid ? 'kid' : (dark ? 'night' : 'day');
                 root.style.colorScheme = (kid || !dark) ? 'light' : 'dark';
                 root.style.setProperty('--bg', bg);

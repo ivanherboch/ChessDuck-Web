@@ -219,6 +219,42 @@ export function isTwoPane(width = window.innerWidth, height = window.innerHeight
     return width >= 540 && width > height * 1.15;
 }
 
+export function isIosDevice(nav = typeof navigator !== 'undefined' ? navigator : null) {
+    if (!nav) return false;
+    const ua = nav.userAgent || '';
+    if (/iPhone|iPad|iPod/.test(ua)) return true;
+    return nav.platform === 'MacIntel' && (nav.maxTouchPoints || 0) > 1;
+}
+
+export function computeIosTopGap({
+    isIos = false,
+    standalone = false,
+    innerWidth = 0,
+    innerHeight = 0,
+    screenWidth = 0,
+    screenHeight = 0,
+    safeTop = 0,
+} = {}) {
+    if (!isIos) return 0;
+    const portrait = innerHeight >= innerWidth;
+    if (!portrait) {
+        return innerHeight > 0 && innerHeight <= 450 ? 8 : 12;
+    }
+    if (standalone) {
+        if (safeTop > 0) return 40;
+        const screenPortraitH = Math.max(screenWidth || 0, screenHeight || 0);
+        const screenPortraitW = Math.min(screenWidth || 0, screenHeight || 0);
+        const coversFullScreen = screenPortraitH > 0 && innerHeight >= screenPortraitH - 4;
+        if (coversFullScreen) {
+            const isTabletSize = screenPortraitW >= 600;
+            const statusFallback = isTabletSize ? 24 : (screenPortraitH >= 850 ? 59 : (screenPortraitH >= 780 ? 47 : 20));
+            return statusFallback + 40;
+        }
+        return 20;
+    }
+    return safeTop > 0 ? 28 : 20;
+}
+
 export function isDarkTheme(themeMode) {
     if (themeMode === 1) return false;
     if (themeMode === 0) {
