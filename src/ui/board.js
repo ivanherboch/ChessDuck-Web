@@ -111,7 +111,9 @@ export class ChessBoardView {
         this.promoEl.addEventListener('click', (e) => {
             if (e.target === this.promoEl) {
                 this._promoPair = null;
+                this._selected = -1;
                 this._renderPromo();
+                this.draw();
             }
         });
     }
@@ -127,7 +129,9 @@ export class ChessBoardView {
         Object.assign(this._state, next);
         pieceStore.preloadSet(this._state.kid).catch(() => {});
 
-        if (this._state.position !== prevPos) {
+        const clearStaleInteraction = !this._state.interactive &&
+            (this._selected >= 0 || this._dragFrom >= 0 || this._promoPair || this._pointer);
+        if (this._state.position !== prevPos || clearStaleInteraction) {
             this._lastPosition = this._state.position;
             this._selected = -1;
             this._dragFrom = -1;
@@ -298,7 +302,7 @@ export class ChessBoardView {
 
         this.canvas.addEventListener('pointermove', (e) => {
             const ptr = this._pointer;
-            if (!ptr || e.pointerId !== ptr.id || !this._state.position) return;
+            if (!ptr || e.pointerId !== ptr.id || !this._state.position || !this._state.interactive) return;
             const { x, y } = coordsOf(e);
             if (ptr.own && !ptr.dragging && Math.hypot(x - ptr.downX, y - ptr.downY) > slop) {
                 ptr.dragging = true;
@@ -317,7 +321,12 @@ export class ChessBoardView {
             this._pointer = null;
             try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
             const pos = this._state.position;
-            if (!pos) return;
+            if (!pos || !this._state.interactive) {
+                this._dragFrom = -1;
+                this._selected = -1;
+                this.draw();
+                return;
+            }
             const { x, y, size } = coordsOf(e);
             const s = size / 8;
 

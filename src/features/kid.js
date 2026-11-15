@@ -388,6 +388,7 @@ export class KidFeature {
                 this._blocked = pos.inCheck ? 'Ton roi est en échec : protège-le !' : 'Cette pièce est bloquée !';
                 if (this._blockedTimer) clearTimeout(this._blockedTimer);
                 this._blockedTimer = setTimeout(() => {
+                    if (this._destroyed) return;
                     this._blocked = null;
                     this._blockedTimer = null;
                     this._render();

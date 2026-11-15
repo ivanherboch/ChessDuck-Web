@@ -57,6 +57,10 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
     let band = state.band;
     let query = '';
     let notFound = false;
+    let closed = false;
+    let opening = false;
+    let countsToken = 0;
+    let searchToken = 0;
     let counts = new Map();
     let sugg = { query: '', items: [], more: false };
     let searchTimer = null;
@@ -65,6 +69,7 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
     if (initialGroup) expanded.add(initialGroup);
 
     const sheet = createSheet('Catalogue des problèmes', () => {
+        closed = true;
         if (searchTimer) clearTimeout(searchTimer);
         onClose?.();
     });
@@ -112,12 +117,18 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
 
     async function submitId() {
         const raw = query.trim();
-        if (!raw) return;
-        const ok = await onOpenById(raw);
-        if (ok) sheet.close();
-        else {
-            notFound = true;
-            renderSearchExtras();
+        if (!raw || closed || opening) return;
+        opening = true;
+        try {
+            const ok = await onOpenById(raw);
+            if (closed) return;
+            if (ok) sheet.close();
+            else {
+                notFound = true;
+                renderSearchExtras();
+            }
+        } finally {
+            opening = false;
         }
     }
 
@@ -137,6 +148,7 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
 
         if (searchTimer) clearTimeout(searchTimer);
         const raw = query.trim().replace(/^#/, '').toLowerCase();
+        const tok = ++searchToken;
         if (!raw) {
             sugg = { query: '', items: [], more: false };
             renderSuggestions();
@@ -145,6 +157,7 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
         searchTimer = setTimeout(async () => {
             try {
                 const { items, total } = await db.searchIds(raw, 5);
+                if (closed || tok !== searchToken) return;
                 sugg = {
                     query: query.trim().replace(/^#/, ''),
                     items: items.map((it) => ({
@@ -173,9 +186,15 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
             const ratEl = el('span', 'sugg-rating', String(item.rating));
             row.append(idEl, typeEl, ratEl);
             row.addEventListener('click', async () => {
-                feedback.key();
-                await onOpenSuggestion(item.id);
-                sheet.close();
+                if (closed || opening) return;
+                opening = true;
+                try {
+                    feedback.key();
+                    await onOpenSuggestion(item.id);
+                    if (!closed) sheet.close();
+                } finally {
+                    opening = false;
+                }
             });
             box.appendChild(row);
         }
@@ -281,8 +300,10 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
     }
 
     async function loadCounts() {
+        const tok = ++countsToken;
         const range = PuzzleThemes.bandRange(band);
         const rows = await db.themeCounts(range);
+        if (closed || tok !== countsToken) return;
         const byTheme = new Map(rows.map((r) => [r.theme, r]));
         const next = new Map();
         let sumTotal = 0;

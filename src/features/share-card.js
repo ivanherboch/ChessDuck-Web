@@ -464,7 +464,7 @@ export const ShareCard = {
         }
         g.footer(h, puzzle.id);
         const blob = await canvasToBlob(cv);
-        const previewUrl = URL.createObjectURL(blob);
+        const previewUrl = blob ? URL.createObjectURL(blob) : null;
         return { canvas: cv, blob, previewUrl };
     },
 
@@ -659,7 +659,7 @@ export const ShareCard = {
         g.footer(h, puzzle.id);
 
         const blob = await canvasToBlob(cv);
-        const previewUrl = URL.createObjectURL(blob);
+        const previewUrl = blob ? URL.createObjectURL(blob) : null;
         return { canvas: cv, blob, previewUrl };
     },
 

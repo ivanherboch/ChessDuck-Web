@@ -1,5 +1,5 @@
 import { prefs } from '../data/prefs.js';
-import { createSheet, duckButton, duckSegmentedRow, el } from '../ui/common.js';
+import { createSheet, duckButton, duckSegmentedRow, el, updateSegmentedRow } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { narrator } from '../ui/narrator.js';
 import { DuckPalette, isDarkTheme } from '../ui/theme.js';
@@ -13,7 +13,9 @@ function createSwitchRow({ title, description, checked, onChange }) {
 
     const copy = el('div', 'settings-switch-copy');
     copy.appendChild(el('div', 'settings-switch-title', title));
-    if (description) copy.appendChild(el('div', 'settings-switch-desc', description));
+    const descEl = el('div', 'settings-switch-desc', description || '');
+    if (!description) descEl.classList.add('hidden');
+    copy.appendChild(descEl);
 
     const track = el('span', `duck-switch${checked ? ' is-checked' : ''}`);
     track.setAttribute('aria-hidden', 'true');
@@ -22,6 +24,7 @@ function createSwitchRow({ title, description, checked, onChange }) {
 
     row.append(copy, track);
     row.addEventListener('click', () => {
+        if (row.disabled) return;
         feedback.key();
         const next = row.getAttribute('aria-checked') !== 'true';
         onChange(next);
@@ -32,6 +35,14 @@ function createSwitchRow({ title, description, checked, onChange }) {
         setChecked(v) {
             row.setAttribute('aria-checked', String(Boolean(v)));
             track.classList.toggle('is-checked', Boolean(v));
+        },
+        setEnabled(en) {
+            row.disabled = !en;
+            row.setAttribute('aria-disabled', String(!en));
+        },
+        setDescription(desc) {
+            descEl.textContent = desc || '';
+            descEl.classList.toggle('hidden', !desc);
         },
     };
 }
@@ -94,36 +105,28 @@ function createPseudoField({ label, initial, fallback, onSave }) {
     };
 }
 
-function createPaletteOption(palette, dark, selected, onClick) {
-    const p = palette.colors(dark);
+function createPaletteOption(palette, onClick) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `palette-option${selected ? ' is-selected' : ''}`;
+    btn.className = 'palette-option';
     btn.setAttribute('role', 'radio');
-    btn.setAttribute('aria-checked', String(Boolean(selected)));
-    btn.setAttribute('aria-label', `${palette.title}. ${palette.description}`);
+    btn.setAttribute('aria-checked', 'false');
+    btn.setAttribute('aria-label', `${palette.label}. ${palette.description}`);
 
     const preview = el('div', 'palette-preview');
-    preview.style.background = p.bg;
-    preview.style.borderColor = p.outlineStrong;
-
     const topBar = el('div', 'palette-preview-bar');
-    topBar.style.background = p.goldRole.fill;
-
     const bottomRow = el('div', 'palette-preview-bottom');
     const card = el('div', 'palette-preview-card');
-    card.style.background = p.surface;
-    for (const col of [p.greenRole.fill, p.blueRole.fill, p.redRole.fill]) {
+    const dots = [];
+    for (let i = 0; i < 3; i++) {
         const dot = el('span', 'palette-preview-dot');
-        dot.style.background = col;
+        dots.push(dot);
         card.appendChild(dot);
     }
 
     const sqPair = el('div', 'palette-preview-squares');
     const sqL = el('span', 'palette-preview-sq');
-    sqL.style.background = p.squareLight;
     const sqD = el('span', 'palette-preview-sq');
-    sqD.style.background = p.squareDark;
     sqPair.append(sqL, sqD);
 
     bottomRow.append(card, sqPair);
@@ -131,33 +134,63 @@ function createPaletteOption(palette, dark, selected, onClick) {
 
     const copy = el('div', 'palette-option-copy');
     copy.append(
-        el('div', 'palette-option-title', palette.title),
+        el('div', 'palette-option-title', palette.label),
         el('div', 'palette-option-desc', palette.description),
     );
 
-    const radio = el('span', `duck-radio${selected ? ' is-checked' : ''}`);
+    const radio = el('span', 'duck-radio');
     radio.setAttribute('aria-hidden', 'true');
+    radio.appendChild(el('span', 'duck-radio-dot'));
 
     btn.append(preview, copy, radio);
     btn.addEventListener('click', () => {
         feedback.key();
-        onClick();
+        onClick(palette.ordinal);
     });
-    return btn;
+
+    return {
+        ordinal: palette.ordinal,
+        el: btn,
+        update(dark, selected) {
+            const p = palette.colors(dark);
+            btn.classList.toggle('is-selected', Boolean(selected));
+            btn.setAttribute('aria-checked', String(Boolean(selected)));
+            preview.style.background = p.bg;
+            preview.style.borderColor = p.outlineStrong;
+            topBar.style.background = p.goldRole.fill;
+            card.style.background = p.surface;
+            const roleCols = [p.greenRole.fill, p.blueRole.fill, p.redRole.fill];
+            dots.forEach((dot, idx) => { dot.style.background = roleCols[idx]; });
+            sqL.style.background = p.squareLight;
+            sqD.style.background = p.squareDark;
+            radio.classList.toggle('is-checked', Boolean(selected));
+        },
+    };
 }
 
 export function openSettingsSheet() {
-    let unsub = null;
+    let closed = false;
+    let unsubPrefs = null;
+    let unsubAvail = null;
+    let mq = null;
+    let onMediaChange = null;
+    let voiceAvail = narrator.available;
     let pseudo1 = null;
     let pseudo2 = null;
 
     narrator.prepare();
 
     const sheet = createSheet('Paramètres', () => {
+        closed = true;
         pseudo1?.flush();
         pseudo2?.flush();
-        unsub?.();
-        unsub = null;
+        unsubPrefs?.();
+        unsubPrefs = null;
+        unsubAvail?.();
+        unsubAvail = null;
+        if (mq && onMediaChange) {
+            mq.removeEventListener?.('change', onMediaChange);
+        }
     });
 
     const b = sheet.body;
@@ -185,6 +218,12 @@ export function openSettingsSheet() {
     // ---- Apparence ----
     b.appendChild(el('h3', 'sheet-section-title', 'Apparence'));
     const themeWrap = el('div', '');
+    const themeSeg = duckSegmentedRow({
+        options: ['Système', 'Jour', 'Nuit'],
+        selectedIndex: prefs.current.themeMode,
+        onSelect: (i) => prefs.setThemeMode(i),
+    });
+    themeWrap.appendChild(themeSeg);
     b.appendChild(themeWrap);
 
     // ---- Échiquier et parties ----
@@ -256,6 +295,9 @@ export function openSettingsSheet() {
     const paletteList = el('div', 'palette-list');
     paletteList.setAttribute('role', 'radiogroup');
     paletteList.setAttribute('aria-label', 'Palette de couleurs');
+    const paletteOptions = DuckPalette.entries.map((entry) =>
+        createPaletteOption(entry, (ord) => prefs.setPalette(ord)));
+    paletteList.append(...paletteOptions.map((opt) => opt.el));
     b.append(paletteIntro, paletteList);
 
     // ---- À propos ----
@@ -269,32 +311,43 @@ export function openSettingsSheet() {
     b.append(aboutText, copyright);
 
     function sync(st) {
-        themeWrap.replaceChildren(duckSegmentedRow({
-            options: ['Système', 'Jour', 'Nuit'],
-            selectedIndex: st.themeMode,
-            onSelect: (i) => prefs.setThemeMode(i),
-        }));
+        if (closed) return;
+        updateSegmentedRow(themeSeg, st.themeMode);
         coordsRow.setChecked(st.coords);
         confirmRow.setChecked(st.confirmActions);
         soundRow.setChecked(st.sound);
         hapticsRow.setChecked(st.haptics);
-        narrationRow.setChecked(st.narration);
+
+        if (voiceAvail === false) {
+            narrationRow.setChecked(false);
+            narrationRow.setEnabled(false);
+            narrationRow.setDescription("La synthèse vocale n'est pas disponible sur ce navigateur.");
+        } else {
+            narrationRow.setChecked(st.narration);
+            narrationRow.setEnabled(true);
+            narrationRow.setDescription("Lit à voix haute les coups et les explications du mode Guidé de l'Académie.");
+        }
+
         pseudo1.syncExternal(st.pseudo);
         pseudo2.syncExternal(st.pseudo2);
         eloInfo.textContent = `Classement actuel : ${st.elo} ELO (formule FIDE, K = 32). Les parties à 2 joueurs ne comptent pas.`;
 
         const dark = isDarkTheme(st.themeMode);
         const currentPal = DuckPalette.of(st.palette);
-        paletteList.replaceChildren(
-            ...DuckPalette.entries.map((entry) => createPaletteOption(
-                entry,
-                dark,
-                entry.ordinal === currentPal.ordinal,
-                () => prefs.setPalette(entry.ordinal),
-            )),
-        );
+        for (const opt of paletteOptions) {
+            opt.update(dark, opt.ordinal === currentPal.ordinal);
+        }
     }
 
-    unsub = prefs.subscribe(sync);
+    unsubPrefs = prefs.subscribe(sync);
+    unsubAvail = narrator.subscribeAvailable((avail) => {
+        voiceAvail = avail;
+        sync(prefs.current);
+    });
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        mq = window.matchMedia('(prefers-color-scheme: dark)');
+        onMediaChange = () => sync(prefs.current);
+        mq.addEventListener?.('change', onMediaChange);
+    }
     return sheet;
 }

@@ -110,8 +110,11 @@ export function duckSegmentedRow({ options, selectedIndex, onSelect, icons = nul
         const active = i === selectedIndex;
         btn.className = `duck-seg-btn${active ? ' is-selected' : ''}`;
         btn.setAttribute('aria-pressed', String(active));
-        if (icons?.[i]) btn.appendChild(createIcon(icons[i], 18));
-        else if (active) btn.appendChild(createIcon('Check', 18));
+        if (icons?.[i]) {
+            btn.appendChild(createIcon(icons[i], 18));
+        } else {
+            btn.appendChild(createIcon('Check', 18, `duck-seg-check${active ? '' : ' hidden'}`));
+        }
         btn.appendChild(el('span', '', label));
         btn.addEventListener('click', () => {
             feedback.key();
@@ -120,6 +123,15 @@ export function duckSegmentedRow({ options, selectedIndex, onSelect, icons = nul
         wrap.appendChild(btn);
     });
     return wrap;
+}
+
+export function updateSegmentedRow(wrap, selectedIndex) {
+    Array.from(wrap.children).forEach((btn, i) => {
+        const active = i === selectedIndex;
+        btn.classList.toggle('is-selected', active);
+        btn.setAttribute('aria-pressed', String(active));
+        btn.querySelector('.duck-seg-check')?.classList.toggle('hidden', !active);
+    });
 }
 
 export function infoPill({ text, icon = null, accent = null, ariaLabel = null, className = '' }) {
@@ -373,7 +385,7 @@ export function openConfirmDialog({ title, text, confirmLabel, onConfirm, dismis
     backdrop.appendChild(dlg);
 
     function onKey(e) {
-        if (e.key === 'Escape') close();
+        if (e.key === 'Escape' && root.lastElementChild === backdrop) close();
     }
     function close() {
         document.removeEventListener('keydown', onKey);
@@ -408,7 +420,7 @@ export function createSheet(title, onCloseCallback = null) {
 
     let closed = false;
     function onKey(e) {
-        if (e.key === 'Escape') close();
+        if (e.key === 'Escape' && root.lastElementChild === backdrop) close();
     }
     function close() {
         if (closed) return;

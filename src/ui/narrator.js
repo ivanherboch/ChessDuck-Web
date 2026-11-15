@@ -82,6 +82,9 @@ class WebNarrator {
         const unlockOnGesture = () => {
             if (this._unlocked) return;
             this._unlocked = true;
+            window.removeEventListener('click', unlockOnGesture);
+            window.removeEventListener('keydown', unlockOnGesture);
+            if (this._seq !== 0) return;
             try {
                 const s = this._synth();
                 if (s && !s.speaking && !s.pending) {
@@ -92,8 +95,8 @@ class WebNarrator {
                 }
             } catch { /* ignore */ }
         };
-        window.addEventListener('touchend', unlockOnGesture, { passive: true, once: true });
-        window.addEventListener('click', unlockOnGesture, { passive: true, once: true });
+        window.addEventListener('click', unlockOnGesture, { passive: true });
+        window.addEventListener('keydown', unlockOnGesture, { passive: true });
 
         // Silence automatique si l'application passe en arrière-plan (iPhone / Android)
         if (typeof document !== 'undefined') {

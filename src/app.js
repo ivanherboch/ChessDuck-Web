@@ -156,7 +156,12 @@ class ChessDuckApp {
         });
         this.memoBtn.classList.toggle('hidden', index !== 0);
         this._syncNavSelection();
-        requestAnimationFrame(() => feat.onActivate());
+        feat.onActivate?.();
+        requestAnimationFrame(() => {
+            if (!prefs.current.kidMode && this.activeTab === index) {
+                feat.onActivate?.();
+            }
+        });
     }
 
     selectTab(index) {

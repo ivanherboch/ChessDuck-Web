@@ -27,6 +27,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
     shareLight: false,
 });
 
+function clampInt(v, min, max, fallback) {
+    return Number.isInteger(v) && v >= min && v <= max ? v : fallback;
+}
+
 function loadInitial() {
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -35,10 +39,20 @@ function loadInitial() {
         return {
             ...DEFAULT_SETTINGS,
             ...parsed,
-            palette: Number.isInteger(parsed.palette) ? parsed.palette : 0,
+            themeMode: clampInt(parsed.themeMode, 0, 2, DEFAULT_SETTINGS.themeMode),
+            palette: clampInt(parsed.palette, 0, 4, DEFAULT_SETTINGS.palette),
+            coords: parsed.coords !== undefined ? Boolean(parsed.coords) : DEFAULT_SETTINGS.coords,
+            confirmActions: parsed.confirmActions !== undefined ? Boolean(parsed.confirmActions) : DEFAULT_SETTINGS.confirmActions,
+            notationBest: Number.isInteger(parsed.notationBest) && parsed.notationBest >= 0 ? parsed.notationBest : 0,
+            haptics: parsed.haptics !== undefined ? Boolean(parsed.haptics) : DEFAULT_SETTINGS.haptics,
+            sound: parsed.sound !== undefined ? Boolean(parsed.sound) : DEFAULT_SETTINGS.sound,
             narration: Boolean(parsed.narration),
-            recentPuzzles: Array.isArray(parsed.recentPuzzles) ? parsed.recentPuzzles : [],
-            knownThemePuzzles: Array.isArray(parsed.knownThemePuzzles) ? parsed.knownThemePuzzles : [],
+            kidMode: Boolean(parsed.kidMode),
+            recentPuzzles: Array.isArray(parsed.recentPuzzles) ? parsed.recentPuzzles.filter((x) => typeof x === 'string' && x) : [],
+            knownThemePuzzles: Array.isArray(parsed.knownThemePuzzles) ? parsed.knownThemePuzzles.filter((x) => typeof x === 'string' && x) : [],
+            colorChoice: clampInt(parsed.colorChoice, 0, 2, DEFAULT_SETTINGS.colorChoice),
+            puzzleBand: clampInt(parsed.puzzleBand, 0, 4, DEFAULT_SETTINGS.puzzleBand),
+            notationLevel: clampInt(parsed.notationLevel, 0, 3, DEFAULT_SETTINGS.notationLevel),
         };
     } catch {
         return { ...DEFAULT_SETTINGS };
@@ -70,8 +84,8 @@ class PrefsStore {
         for (const fn of this._subs) fn(next);
     }
 
-    setThemeMode(v) { this._update({ themeMode: v }); }
-    setPalette(v) { this._update({ palette: v }); }
+    setThemeMode(v) { this._update({ themeMode: clampInt(v, 0, 2, DEFAULT_SETTINGS.themeMode) }); }
+    setPalette(v) { this._update({ palette: clampInt(v, 0, 4, DEFAULT_SETTINGS.palette) }); }
     setCoords(v) { this._update({ coords: Boolean(v) }); }
     setConfirmActions(v) { this._update({ confirmActions: Boolean(v) }); }
     setNotationBest(v) {
@@ -103,12 +117,19 @@ class PrefsStore {
     setPseudo2(v) { this._update({ pseudo2: v }); }
     setElo(v) { this._update({ elo: v }); }
     setGameSettings(twoPlayers, colorChoice, aiElo) {
-        this._update({ twoPlayers, colorChoice, aiElo });
+        this._update({
+            twoPlayers: Boolean(twoPlayers),
+            colorChoice: clampInt(colorChoice, 0, 2, DEFAULT_SETTINGS.colorChoice),
+            aiElo,
+        });
     }
     setPuzzleFilter(puzzleBand, puzzleTheme) {
-        this._update({ puzzleBand, puzzleTheme });
+        this._update({
+            puzzleBand: clampInt(puzzleBand, 0, 4, DEFAULT_SETTINGS.puzzleBand),
+            puzzleTheme: typeof puzzleTheme === 'string' ? puzzleTheme : '',
+        });
     }
-    setNotationLevel(v) { this._update({ notationLevel: v }); }
+    setNotationLevel(v) { this._update({ notationLevel: clampInt(v, 0, 3, DEFAULT_SETTINGS.notationLevel) }); }
     setLesson(v) { this._update({ lessonId: v }); }
     setShareStyle(shareFormat, shareLight) {
         this._update({ shareFormat, shareLight });

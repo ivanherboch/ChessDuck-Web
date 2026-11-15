@@ -26,6 +26,7 @@ export function openExportSheet({ puzzle, line, playerWhite, solved, onClose }) 
     let solutionShot = null;
     let revealSolution = false;
     let busy = false;
+    let closed = false;
 
     const cleanupUrls = () => {
         if (problemShot?.previewUrl) URL.revokeObjectURL(problemShot.previewUrl);
@@ -35,6 +36,7 @@ export function openExportSheet({ puzzle, line, playerWhite, solved, onClose }) 
     };
 
     const sheet = createSheet('Exporter en image', () => {
+        closed = true;
         cleanupUrls();
         onClose?.();
     });
@@ -153,26 +155,35 @@ export function openExportSheet({ puzzle, line, playerWhite, solved, onClose }) 
             onShare: async () => {
                 busy = true;
                 renderControlsAndCards();
+                const cached = problemShot;
+                let shot = cached;
                 try {
-                    const shot = problemShot || await ShareCard.render(puzzle, line.positions[1], playerWhite, line.moves[0], style);
+                    if (!shot) shot = await ShareCard.render(puzzle, line.positions[1], playerWhite, line.moves[0], style);
+                    if (closed) return;
                     const ch = ShareCard.challenge(puzzle, Line.fromUci(puzzle.fen, puzzle.moves), playerWhite);
                     await ShareCard.shareBlob(shot.blob, `chessduck-${puzzle.id}.png`, `${ch}. Saurez-vous trouver la solution ?`);
-                    sheet.close();
+                    if (!closed) sheet.close();
                 } finally {
+                    if (!cached && shot?.previewUrl && shot !== problemShot) URL.revokeObjectURL(shot.previewUrl);
                     busy = false;
+                    if (!closed) renderControlsAndCards();
                 }
             },
             onSave: async () => {
                 busy = true;
                 renderControlsAndCards();
+                const cached = problemShot;
+                let shot = cached;
                 try {
-                    const shot = problemShot || await ShareCard.render(puzzle, line.positions[1], playerWhite, line.moves[0], style);
+                    if (!shot) shot = await ShareCard.render(puzzle, line.positions[1], playerWhite, line.moves[0], style);
+                    if (closed) return;
                     const msg = ShareCard.saveBlob(shot.blob, `chessduck-${puzzle.id}.png`);
                     if (msg) setStatus(true, msg);
                     else setStatus(false, "L'image n'a pas pu être enregistrée.");
                 } finally {
+                    if (!cached && shot?.previewUrl && shot !== problemShot) URL.revokeObjectURL(shot.previewUrl);
                     busy = false;
-                    renderControlsAndCards();
+                    if (!closed) renderControlsAndCards();
                 }
             },
         }));
@@ -192,25 +203,34 @@ export function openExportSheet({ puzzle, line, playerWhite, solved, onClose }) 
             onShare: async () => {
                 busy = true;
                 renderControlsAndCards();
+                const cached = solutionShot;
+                let shot = cached;
                 try {
-                    const shot = solutionShot || await ShareCard.renderSolution(puzzle, style);
+                    if (!shot) shot = await ShareCard.renderSolution(puzzle, style);
+                    if (closed) return;
                     await ShareCard.shareBlob(shot.blob, `chessduck-${puzzle.id}-solution.png`, `Solution du problème Lichess #${puzzle.id}`);
-                    sheet.close();
+                    if (!closed) sheet.close();
                 } finally {
+                    if (!cached && shot?.previewUrl && shot !== solutionShot) URL.revokeObjectURL(shot.previewUrl);
                     busy = false;
+                    if (!closed) renderControlsAndCards();
                 }
             },
             onSave: async () => {
                 busy = true;
                 renderControlsAndCards();
+                const cached = solutionShot;
+                let shot = cached;
                 try {
-                    const shot = solutionShot || await ShareCard.renderSolution(puzzle, style);
+                    if (!shot) shot = await ShareCard.renderSolution(puzzle, style);
+                    if (closed) return;
                     const msg = ShareCard.saveBlob(shot.blob, `chessduck-${puzzle.id}-solution.png`);
                     if (msg) setStatus(true, msg);
                     else setStatus(false, "L'image n'a pas pu être enregistrée.");
                 } finally {
+                    if (!cached && shot?.previewUrl && shot !== solutionShot) URL.revokeObjectURL(shot.previewUrl);
                     busy = false;
-                    renderControlsAndCards();
+                    if (!closed) renderControlsAndCards();
                 }
             },
         }));
@@ -224,7 +244,7 @@ export function openExportSheet({ puzzle, line, playerWhite, solved, onClose }) 
             ShareCard.render(puzzle, line.positions[1], playerWhite, line.moves[0], style),
             ShareCard.renderSolution(puzzle, style),
         ]);
-        if (token !== renderToken) {
+        if (closed || token !== renderToken) {
             if (pRes?.previewUrl) URL.revokeObjectURL(pRes.previewUrl);
             if (sRes?.previewUrl) URL.revokeObjectURL(sRes.previewUrl);
             return;

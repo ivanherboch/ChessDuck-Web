@@ -56,13 +56,16 @@ export class PuzzlesFeature {
         this._refuteToken = 0;
         this._loadToken = 0;
         this._refuteRaf = 0;
+        this._destroyed = false;
 
         this._unsubSolved = db.subscribeSolvedIds((s) => {
+            if (this._destroyed) return;
             this.solvedIds = new Set(s);
             this._render();
         });
         this._lastRecentsKey = '';
         this._unsubPrefs = prefs.subscribe((st) => {
+            if (this._destroyed) return;
             const key = st.recentPuzzles.slice(1, 6).join(',');
             if (key !== this._lastRecentsKey) {
                 this._lastRecentsKey = key;
@@ -79,8 +82,10 @@ export class PuzzlesFeature {
         this.state.band = st.puzzleBand;
         this.state.theme = st.puzzleTheme;
         await db.initUserState();
+        if (this._destroyed) return;
         const id = st.puzzleId;
         const current = id ? await db.byId(id).catch(() => null) : null;
+        if (this._destroyed) return;
         if (current) this.show(current);
         else await this.random();
     }
@@ -93,15 +98,16 @@ export class PuzzlesFeature {
         }
         try {
             const found = await db.byIds(ids);
+            if (this._destroyed) return;
             this.recents = ids.map((id) => found.find((p) => p.id === id)).filter(Boolean);
             this._render();
         } catch { /* ignore */ }
     }
 
     destroy() {
-        if (this._playTimer) clearTimeout(this._playTimer);
-        if (this._refuteRaf) cancelAnimationFrame(this._refuteRaf);
-        this._refuteAbort?.abort();
+        this._destroyed = true;
+        this._loadToken += 1;
+        this._cancelTimers();
         this._unsubSolved?.();
         this._unsubPrefs?.();
         this.board.destroy();
@@ -258,7 +264,7 @@ export class PuzzlesFeature {
         const token = ++this._loadToken;
         this._playTimer = setTimeout(() => {
             this._playTimer = null;
-            if (token !== this._loadToken || this.state.puzzle?.id !== p.id) return;
+            if (this._destroyed || token !== this._loadToken || this.state.puzzle?.id !== p.id) return;
             this.state.progress = 1;
             this.state.cursor = 1;
             this.state.anim = moveAnim(line.positions[0], line.moves[0]);
@@ -272,7 +278,7 @@ export class PuzzlesFeature {
 
     async openSuggestion(id) {
         const p = await db.byId(id).catch(() => null);
-        if (p) this.show(p);
+        if (!this._destroyed && p) this.show(p);
     }
 
     async openById(raw) {
@@ -280,6 +286,7 @@ export class PuzzlesFeature {
         const id = parts[parts.length - 1].trim();
         if (!id) return false;
         const p = (await db.byId(id).catch(() => null)) || (await db.byIdIgnoreCase(id).catch(() => null));
+        if (this._destroyed) return false;
         if (p) {
             this.show(p);
             return true;
@@ -299,9 +306,9 @@ export class PuzzlesFeature {
         else if (s.theme) themes = [s.theme];
 
         const id = await db.randomId(themes, range, cur).catch(() => null);
-        if (token !== this._loadToken) return;
+        if (this._destroyed || token !== this._loadToken) return;
         const p = id ? await db.byId(id).catch(() => null) : null;
-        if (token !== this._loadToken) return;
+        if (this._destroyed || token !== this._loadToken) return;
         if (p) {
             this.show(p);
         } else {
@@ -401,7 +408,7 @@ export class PuzzlesFeature {
             const token = this._loadToken;
             this._playTimer = setTimeout(() => {
                 this._playTimer = null;
-                if (token !== this._loadToken || this.state.puzzle?.id !== p.id) return;
+                if (this._destroyed || token !== this._loadToken || this.state.puzzle?.id !== p.id) return;
                 const reply = newLine.moves[cur + 1];
                 s.cursor = cur + 2;
                 s.progress = cur + 2;
@@ -445,7 +452,7 @@ export class PuzzlesFeature {
             s.refuteHold = REFUTE_HOLD;
             this._render();
             await new Promise((r) => { this._playTimer = setTimeout(r, REFUTE_HOLD); });
-            if (token === this._refuteToken) this.retry();
+            if (!this._destroyed && token === this._refuteToken) this.retry();
             return;
         }
 
@@ -458,13 +465,13 @@ export class PuzzlesFeature {
             clearTimeout(timeoutId);
             this._refuteAbort = null;
         }
-        if (token !== this._refuteToken) return;
+        if (this._destroyed || token !== this._refuteToken) return;
 
         const waitMs = Math.max(0, 650 - (performance.now() - t0));
         if (waitMs > 0) {
             await new Promise((r) => { this._playTimer = setTimeout(r, waitMs); });
         }
-        if (token !== this._refuteToken) return;
+        if (this._destroyed || token !== this._refuteToken) return;
 
         const reply = (res?.best && after.isLegal(res.best))
             ? res.best
@@ -495,7 +502,7 @@ export class PuzzlesFeature {
 
         this._playTimer = setTimeout(() => {
             this._playTimer = null;
-            if (token === this._refuteToken) this.retry();
+            if (!this._destroyed && token === this._refuteToken) this.retry();
         }, REFUTE_HOLD);
     }
 
@@ -540,12 +547,13 @@ export class PuzzlesFeature {
     _updateCountdown() {
         if (this._refuteRaf) { cancelAnimationFrame(this._refuteRaf); this._refuteRaf = 0; }
         const s = this.state;
-        if (!s.refute || !s.refuteUntil) {
+        if (this._destroyed || !s.refute || !s.refuteUntil) {
             this.refuteBarWrap.classList.add('hidden');
             return;
         }
         this.refuteBarWrap.classList.remove('hidden');
         const tick = () => {
+            if (this._destroyed) return;
             const left = Math.max(0, s.refuteUntil - performance.now());
             const ratio = s.refuteHold > 0 ? Math.min(1, left / s.refuteHold) : 0;
             this.refuteBarFill.style.width = `${(ratio * 100).toFixed(2)}%`;
@@ -558,7 +566,7 @@ export class PuzzlesFeature {
 
     _renderBoard() {
         const s = this.state;
-        if (!s.puzzle || !s.line || !this._palette) return;
+        if (this._destroyed || !s.puzzle || !s.line || !this._palette) return;
         const r = s.refute;
         const cur = Math.max(0, Math.min(s.line.size, s.cursor));
         const pos = r ? r.position : s.line.positions[cur];
@@ -590,6 +598,7 @@ export class PuzzlesFeature {
     }
 
     _render() {
+        if (this._destroyed) return;
         const s = this.state;
         this._ensureVisible();
         const p = s.puzzle;

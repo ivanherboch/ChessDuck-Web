@@ -5,7 +5,7 @@ import { prefs } from '../data/prefs.js';
 import { ChessBoardView } from '../ui/board.js';
 import {
     FeedbackCardView, ModuleLayoutView, MoveStripView, Tone,
-    duckButton, duckIconButton, duckSegmentedRow, el, infoPill, loadingState,
+    duckButton, duckIconButton, duckSegmentedRow, el, infoPill, loadingState, updateSegmentedRow,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
@@ -46,31 +46,43 @@ export class AcademyFeature {
         this._palette = null;
         this._showCoords = true;
         this._catalog = null;
+        this._destroyed = false;
+        this._voiceAvailable = narrator.available;
         this._lastNarration = prefs.current.narration;
 
         this._unsubLessons = db.subscribeMasteredLessons((set) => {
+            if (this._destroyed) return;
             this.mastered = new Set(set);
             this._catalog?.updateMastered(this.mastered);
             if (Lessons.all.length) this._render();
         });
 
-        this._unsubNarrator = narrator.subscribe(() => {
-            if (Lessons.all.length && !this.state.challenge) this._render();
+        this._unsubSpeak = narrator.subscribeSpeaking(() => {
+            if (!this._destroyed && Lessons.all.length && !this.state.challenge) this._render();
+        });
+
+        this._unsubAvail = narrator.subscribeAvailable((avail) => {
+            this._voiceAvailable = avail;
+            if (!this._destroyed && Lessons.all.length && !this.state.challenge) this._render();
         });
 
         this._unsubPrefs = prefs.subscribe((st) => {
+            if (this._destroyed) return;
             if (st.narration !== this._lastNarration) {
                 this._lastNarration = st.narration;
-                if (!st.narration) narrator.stop();
+                if (st.narration) narrator.prepare();
+                else narrator.stop();
                 if (Lessons.all.length && !this.state.challenge) this._render();
             }
         });
 
+        if (prefs.current.narration) narrator.prepare();
         this._init();
     }
 
     async _init() {
         await Lessons.load();
+        if (this._destroyed) return;
         this._buildDom();
         this.open(prefs.current.lessonId || 1, false);
         this.loadingEl.remove();
@@ -80,10 +92,13 @@ export class AcademyFeature {
     }
 
     destroy() {
+        this._destroyed = true;
         this.playback.cancel();
         narrator.stop();
+        this._catalog?.sheet?.close();
         this._unsubLessons?.();
-        this._unsubNarrator?.();
+        this._unsubSpeak?.();
+        this._unsubAvail?.();
         this._unsubPrefs?.();
         this.board.destroy();
         this.feedbackCard.destroy();
@@ -97,6 +112,7 @@ export class AcademyFeature {
     }
 
     onActivate() {
+        if (prefs.current.narration) narrator.prepare();
         this.layout.relayout();
         this.board._syncCanvasSize();
         this.board.draw();
@@ -125,12 +141,13 @@ export class AcademyFeature {
     }
 
     narrate() {
-        if (prefs.current.narration && !this.state.challenge) {
+        if (prefs.current.narration && this._voiceAvailable !== false && !this.state.challenge) {
             narrator.speak(this.spokenStep());
         }
     }
 
     toggleSpeech() {
+        if (this._voiceAvailable === false) return;
         if (narrator.speaking) narrator.stop();
         else narrator.speak(this.spokenStep());
     }
@@ -160,9 +177,15 @@ export class AcademyFeature {
 
         // Row 2: Segmented Guidé/Défi + flip
         this.modeRow = el('div', 'academy-mode-row');
-        this.segWrap = el('div', 'flex-1');
+        this.modeSeg = duckSegmentedRow({
+            options: ['Guidé (démo)', 'Défi (pratique)'],
+            selectedIndex: this.state.challenge ? 1 : 0,
+            icons: ['Visibility', 'SportsScore'],
+            onSelect: (i) => this.setChallenge(i === 1),
+        });
+        this.modeSeg.classList.add('flex-1');
         this.flipBtn = duckIconButton({ icon: 'SwapVert', ariaLabel: "Retourner l'échiquier", onClick: () => this.flip() });
-        this.modeRow.append(this.segWrap, this.flipBtn);
+        this.modeRow.append(this.modeSeg, this.flipBtn);
 
         this.layout.topSlot.append(this.selRow, this.modeRow);
         this.layout.boardHost.appendChild(this.board.el);
@@ -292,11 +315,12 @@ export class AcademyFeature {
         this.playback.autoplay({
             cursor: () => this.state.cursor,
             size: () => l.line.size,
-            delayFor: (c) => (prefs.current.narration ? 600 : (c === 0 ? 700 : 2600)),
+            delayFor: (c) => ((prefs.current.narration && this._voiceAvailable !== false) ? 600 : (c === 0 ? 700 : 2600)),
             checkBeforeDelay: true,
-            awaitReady: () => narrator.awaitIdle(),
+            awaitReady: () => ((prefs.current.narration && this._voiceAvailable !== false) ? narrator.awaitIdle() : Promise.resolve()),
             advance: (t) => this.goTo(t),
             onEnd: () => {
+                if (this._destroyed) return;
                 this.state.playing = false;
                 this._render();
             },
@@ -333,17 +357,18 @@ export class AcademyFeature {
         const l = this.lesson;
         if (!l) return;
         this.playback.launch(async ({ isCancelled, wait }) => {
-            while (!isCancelled() && this.state.cursor < l.line.size && !this._heroToMove(this.state.cursor)) {
+            while (!this._destroyed && !isCancelled() && this.state.cursor < l.line.size && !this._heroToMove(this.state.cursor)) {
                 const ok = await wait(650);
-                if (!ok || isCancelled()) return;
+                if (!ok || this._destroyed || isCancelled()) return;
                 const cur = this.state.cursor;
                 this.state.anim = moveAnim(l.line.positions[cur], l.line.moves[cur]);
                 this.state.cursor = cur + 1;
                 this.state.hintStage = 0;
                 this._render();
             }
-            if (!isCancelled() && this.state.cursor >= l.line.size) {
+            if (!this._destroyed && !isCancelled() && this.state.cursor >= l.line.size) {
                 await db.markLesson(l.id);
+                if (this._destroyed || isCancelled()) return;
                 this.state.done = true;
                 this.state.tone = Tone.GOOD;
                 this.state.message = `Leçon maîtrisée ! Vous avez joué tous les coups clés de « ${l.title} ».`;
@@ -400,7 +425,7 @@ export class AcademyFeature {
 
     _renderBoard() {
         const l = this.lesson;
-        if (!l || !this._palette) return;
+        if (this._destroyed || !l || !this._palette) return;
         const s = this.state;
         const line = l.line;
         const cur = Math.max(0, Math.min(line.size, s.cursor));
@@ -436,7 +461,7 @@ export class AcademyFeature {
 
     _render() {
         const l = this.lesson;
-        if (!l || !this.selRow) return;
+        if (this._destroyed || !l || !this.selRow) return;
         const s = this.state;
         const line = l.line;
         const total = Lessons.all.length;
@@ -456,12 +481,7 @@ export class AcademyFeature {
         );
 
         // Mode segmented bar
-        this.segWrap.replaceChildren(duckSegmentedRow({
-            options: ['Guidé (démo)', 'Défi (pratique)'],
-            selectedIndex: s.challenge ? 1 : 0,
-            icons: ['Visibility', 'SportsScore'],
-            onSelect: (i) => this.setChallenge(i === 1),
-        }));
+        updateSegmentedRow(this.modeSeg, s.challenge ? 1 : 0);
 
         // Move strip
         this.moveStrip.update({
@@ -506,7 +526,7 @@ export class AcademyFeature {
             });
             bNext.style.flex = '1';
             const buttons = [bPrev, bPlay, bNext];
-            if (prefs.current.narration) {
+            if (prefs.current.narration && this._voiceAvailable !== false) {
                 const speaking = narrator.speaking;
                 const bSpeech = duckIconButton({
                     icon: speaking ? 'VolumeOff' : 'VolumeUp',

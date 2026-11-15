@@ -45,6 +45,7 @@ export class NotationFeature {
         this._showTimer = null;
         this._menuOpen = false;
         this._docClickBound = null;
+        this._destroyed = false;
 
         this._buildDom();
         this._init();
@@ -58,6 +59,8 @@ export class NotationFeature {
     }
 
     destroy() {
+        this._destroyed = true;
+        this._nextToken += 1;
         if (this._showTimer) clearTimeout(this._showTimer);
         if (this._docClickBound) document.removeEventListener('click', this._docClickBound, true);
         this.board.destroy();
@@ -75,6 +78,10 @@ export class NotationFeature {
         this.layout.relayout();
         this.board._syncCanvasSize();
         this.board.draw();
+    }
+
+    onDeactivate() {
+        this._toggleMenu(false);
     }
 
     _buildDom() {
@@ -275,7 +282,7 @@ export class NotationFeature {
         if (this._showTimer) { clearTimeout(this._showTimer); this._showTimer = null; }
         const level = this.state.level;
         const ex = await this._generate(level);
-        if (token !== this._nextToken) return;
+        if (this._destroyed || token !== this._nextToken) return;
         this.state.exercise = ex;
         this.state.shown = false;
         this.state.anim = null;
@@ -337,7 +344,7 @@ export class NotationFeature {
         const token = this._nextToken;
         this._showTimer = setTimeout(() => {
             this._showTimer = null;
-            if (token !== this._nextToken) return;
+            if (this._destroyed || token !== this._nextToken) return;
             const ex = this.state.exercise;
             if (!ex) return;
             this.state.shown = true;

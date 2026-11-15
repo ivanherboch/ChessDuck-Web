@@ -82,10 +82,12 @@ export class PlayFeature {
         this.reviewLayout.el.classList.add('hidden');
 
         this._unsubPrefs = prefs.subscribe((st) => {
+            if (this._destroyed) return;
             this.settings = st;
             this._renderLive();
         });
         this._unsubGames = db.subscribeGames((list) => {
+            if (this._destroyed) return;
             this.games = list;
             this.tally = db.getTally();
             if (this.review) {
@@ -95,6 +97,7 @@ export class PlayFeature {
             this._renderLive();
         });
         this._unsubAnalyses = this.analyzer.subscribe((map) => {
+            if (this._destroyed) return;
             if (this.review && map.has(this.review.record.id)) {
                 this.review.analysis = map.get(this.review.record.id);
                 this._renderReview();
@@ -575,6 +578,10 @@ export class PlayFeature {
     }
 
     deleteGame(id) {
+        if (this.state.lastRecord?.id === id) {
+            this.state.lastRecord = null;
+            this._renderLive();
+        }
         db.deleteGame(id).catch(() => {});
     }
 

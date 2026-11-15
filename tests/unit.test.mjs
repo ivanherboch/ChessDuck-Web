@@ -334,8 +334,10 @@ test('WCAG 2.1 AA contrast across Day, Night and Kid palettes', async () => {
 
     const allPalettes = [];
     for (const p of DuckPalette.entries) {
-        allPalettes.push([`${p.title} Nuit`, p.night]);
-        allPalettes.push([`${p.title} Jour`, p.day]);
+        assert.ok(typeof p.label === 'string' && p.label.length > 0, `Palette ${p.key} must have a label`);
+        assert.ok(typeof p.description === 'string' && p.description.length > 0, `Palette ${p.key} must have a description`);
+        allPalettes.push([`${p.label} Nuit`, p.night]);
+        allPalettes.push([`${p.label} Jour`, p.day]);
     }
     allPalettes.push(['Enfant', KidColors]);
 
@@ -498,4 +500,143 @@ test('v2.3.1..v2.4.2: mateFor, Analysis.decided, evalShort rounding & missedMate
     ]);
     assert.match(cLostMate.text, /le mat n'est plus forcé/);
 });
+
+test('Prefs: sanitization and range clamping on corrupted storage and setters', async () => {
+    const prevWin = globalThis.window;
+    const store = new Map();
+    store.set('chessduck_v2_settings', JSON.stringify({
+        themeMode: 99,
+        palette: -3,
+        colorChoice: 8,
+        puzzleBand: 'bad',
+        notationLevel: 42,
+        notationBest: -5,
+        recentPuzzles: ['a', 123, '', null],
+        knownThemePuzzles: ['a', false, ''],
+    }));
+    globalThis.window = {
+        localStorage: {
+            getItem: (k) => (store.has(k) ? store.get(k) : null),
+            setItem: (k, v) => { store.set(k, v); },
+        },
+    };
+    try {
+        const { prefs, DEFAULT_SETTINGS } = await import('../src/data/prefs.js?sanit=1');
+        assert.equal(prefs.current.themeMode, DEFAULT_SETTINGS.themeMode);
+        assert.equal(prefs.current.palette, DEFAULT_SETTINGS.palette);
+        assert.equal(prefs.current.colorChoice, DEFAULT_SETTINGS.colorChoice);
+        assert.equal(prefs.current.puzzleBand, DEFAULT_SETTINGS.puzzleBand);
+        assert.equal(prefs.current.notationLevel, DEFAULT_SETTINGS.notationLevel);
+        assert.equal(prefs.current.notationBest, 0);
+        assert.deepEqual(prefs.current.recentPuzzles, ['a']);
+        assert.deepEqual(prefs.current.knownThemePuzzles, ['a']);
+
+        prefs.setPalette(99);
+        assert.equal(prefs.current.palette, DEFAULT_SETTINGS.palette);
+        prefs.setPalette(4);
+        assert.equal(prefs.current.palette, 4);
+        prefs.setThemeMode(-1);
+        assert.equal(prefs.current.themeMode, DEFAULT_SETTINGS.themeMode);
+        prefs.setPuzzleFilter(9, 456);
+        assert.equal(prefs.current.puzzleBand, DEFAULT_SETTINGS.puzzleBand);
+        assert.equal(prefs.current.puzzleTheme, '');
+    } finally {
+        if (prevWin === undefined) delete globalThis.window;
+        else globalThis.window = prevWin;
+    }
+});
+
+test('WebNarrator: prepare, speak, stop, subscriptions and iOS gesture listener', async () => {
+    const prevWin = globalThis.window;
+    const prevDoc = globalThis.document;
+    const listeners = new Map();
+    const spoken = [];
+    let cancels = 0;
+
+    class MockUtterance {
+        constructor(text) {
+            this.text = text;
+            this.lang = '';
+            this.voice = null;
+            this.volume = 1;
+            this.rate = 1;
+            this.pitch = 1;
+            this.onend = null;
+            this.onerror = null;
+        }
+    }
+
+    const mockSynth = {
+        speaking: false,
+        pending: false,
+        paused: false,
+        getVoices: () => [{ lang: 'fr-FR', name: 'Amélie', localService: true, default: true }],
+        speak(u) {
+            spoken.push(u);
+            this.speaking = true;
+        },
+        cancel() {
+            cancels += 1;
+            this.speaking = false;
+            this.pending = false;
+        },
+        resume() {},
+        addEventListener() {},
+    };
+
+    globalThis.window = {
+        SpeechSynthesisUtterance: MockUtterance,
+        speechSynthesis: mockSynth,
+        addEventListener(type, fn) { listeners.set(type, fn); },
+        removeEventListener(type, fn) { if (listeners.get(type) === fn) listeners.delete(type); },
+    };
+    globalThis.document = {
+        visibilityState: 'visible',
+        addEventListener() {},
+    };
+
+    try {
+        const { narrator } = await import('../src/ui/narrator.js?mock=1');
+        assert.ok(listeners.has('click'));
+        assert.ok(listeners.has('keydown'));
+        assert.equal(listeners.has('touchend'), false);
+
+        const availLog = [];
+        const speakLog = [];
+        const uAvail = narrator.subscribeAvailable((v) => availLog.push(v));
+        const uSpeak = narrator.subscribeSpeaking((v) => speakLog.push(v));
+
+        narrator.prepare();
+        assert.equal(narrator.available, true);
+        assert.ok(availLog.includes(true));
+
+        narrator.speak('cavalier f3');
+        assert.equal(spoken.length, 1);
+        assert.equal(spoken[0].text, 'cavalier f3');
+        assert.equal(spoken[0].lang, 'fr-FR');
+        assert.equal(narrator.speaking, true);
+
+        // Simulate utterance completion
+        mockSynth.speaking = false;
+        spoken[0].onend();
+        assert.equal(narrator.speaking, false);
+        assert.deepEqual(speakLog, [false, true, false]);
+
+        // Cancel & stop
+        narrator.speak('dame h7');
+        assert.equal(narrator.speaking, true);
+        narrator.stop();
+        assert.equal(narrator.speaking, false);
+        assert.ok(cancels >= 1);
+
+        uAvail();
+        uSpeak();
+    } finally {
+        if (prevWin === undefined) delete globalThis.window;
+        else globalThis.window = prevWin;
+        if (prevDoc === undefined) delete globalThis.document;
+        else globalThis.document = prevDoc;
+    }
+});
+
 
