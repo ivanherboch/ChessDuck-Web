@@ -17,7 +17,7 @@ export const PieceLexiconFr = {
     },
     indefinite(type) { return (this.isFeminine(type) ? 'une ' : 'un ') + NAMES[type]; },
     pronoun(type) { return this.isFeminine(type) ? 'la' : 'le'; },
-    possessive(type, secondPerson) {
+    possessive(type, secondPerson = false) {
         const det = secondPerson
             ? (this.isFeminine(type) ? 'ta ' : 'ton ')
             : (this.isFeminine(type) ? 'sa ' : 'son ');

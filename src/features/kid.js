@@ -219,7 +219,8 @@ export class KidFeature {
         this._demoRaf = 0;
         this._demoTimer = null;
         this._demoSnapshot = null;
-        this._quitBackdrop = null;
+        this._confirmBackdrop = null;
+        this._onConfirmKey = null;
         this._destroyed = false;
         this._lastKidNarration = prefs.current.kidNarration;
         this._voice = new KidVoiceController({
@@ -272,7 +273,7 @@ export class KidFeature {
         this._destroyed = true;
         this._stopDemo();
         this._voice.pieceClosed();
-        this._closeQuitDialog();
+        this._closeKidConfirm();
         if (this._blockedTimer) clearTimeout(this._blockedTimer);
         if (typeof document !== 'undefined') {
             document.removeEventListener('visibilitychange', this._onVisibilityChange);
@@ -318,6 +319,7 @@ export class KidFeature {
 
     reset() {
         this._stopDemo();
+        this._closeKidConfirm();
         if (this._blockedTimer) { clearTimeout(this._blockedTimer); this._blockedTimer = null; }
         this._blocked = null;
         this.state = {
@@ -340,8 +342,14 @@ export class KidFeature {
         let result = null;
         if (end === GameEnd.CHECKMATE) {
             result = `🎉 Échec et mat ! Bravo aux ${moverWhite ? 'Blancs' : 'Noirs'} !`;
-        } else if (end !== GameEnd.NONE) {
-            result = "🤝 Partie nulle : personne n'a perdu !";
+        } else if (end === GameEnd.STALEMATE) {
+            result = "🤝 Pat ! Le roi n'est pas en échec, mais il ne peut plus bouger : partie nulle, personne n'a perdu !";
+        } else if (end === GameEnd.INSUFFICIENT) {
+            result = '🤝 Il ne reste plus assez de pièces pour faire échec et mat : partie nulle !';
+        } else if (end === GameEnd.REPETITION) {
+            result = '🤝 La même position est revenue trois fois : partie nulle !';
+        } else if (end === GameEnd.FIFTY_MOVES) {
+            result = '🤝 Cinquante coups sans prise ni pion avancé : partie nulle !';
         }
         s.line = nl;
         s.cursor = nl.size;
@@ -359,6 +367,8 @@ export class KidFeature {
         s.cursor = t;
         s.anim = undoAnim(s.line.positions[t], s.line.moves[t]);
         s.result = null;
+        this._blocked = null;
+        if (this._blockedTimer) { clearTimeout(this._blockedTimer); this._blockedTimer = null; }
         this._render();
     }
 
@@ -368,6 +378,8 @@ export class KidFeature {
         const pos = this.position;
         s.anim = moveAnim(pos, s.line.moves[s.cursor]);
         s.cursor += 1;
+        this._blocked = null;
+        if (this._blockedTimer) { clearTimeout(this._blockedTimer); this._blockedTimer = null; }
         this._render();
     }
 
@@ -442,8 +454,8 @@ export class KidFeature {
         this.layout.bottomSlot.appendChild(this.bottomCol);
     }
 
-    _openQuitDialog() {
-        if (this._quitBackdrop) return;
+    _openKidConfirm({ title, text, goLabel, goIcon, onGo }) {
+        if (this._confirmBackdrop) return;
         this.mainWrap.classList.add('is-blurred');
         const backdrop = el('div', 'kid-quit-backdrop');
         const dlg = el('div', 'kid-quit-dialog');
@@ -455,41 +467,92 @@ export class KidFeature {
         mascot.alt = '';
         mascot.className = 'kid-quit-mascot';
 
-        const title = el('h2', 'kid-quit-title', 'Quitter le mode enfant ?');
-        const desc = el('p', 'kid-quit-desc', 'La partie en cours du mode enfant sera effacée.');
+        const titleEl = el('h2', 'kid-quit-title', title);
+        const descEl = el('p', 'kid-quit-desc', text);
         const stayBtn = kidButton({
             label: 'Non, on continue à jouer',
             variant: 'green',
             icon: 'SportsEsports',
             className: 'full-w kid-quit-stay',
-            onClick: () => this._closeQuitDialog(),
+            onClick: () => this._closeKidConfirm(),
         });
-        const leaveBtn = kidButton({
-            label: 'Oui, quitter',
+        const goBtn = kidButton({
+            label: goLabel,
             variant: 'coral',
-            icon: 'Logout',
+            icon: goIcon,
             className: 'full-w kid-quit-leave',
             onClick: () => {
-                this._closeQuitDialog();
-                prefs.setKidMode(false);
+                this._closeKidConfirm();
+                onGo();
             },
         });
 
-        dlg.append(mascot, title, desc, stayBtn, leaveBtn);
+        dlg.append(mascot, titleEl, descEl, stayBtn, goBtn);
         backdrop.appendChild(dlg);
         backdrop.addEventListener('click', (e) => {
-            if (e.target === backdrop) this._closeQuitDialog();
+            if (e.target === backdrop) this._closeKidConfirm();
         });
+        this._onConfirmKey = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                this._closeKidConfirm();
+            }
+        };
+        document.addEventListener('keydown', this._onConfirmKey);
         this.el.appendChild(backdrop);
-        this._quitBackdrop = backdrop;
+        this._confirmBackdrop = backdrop;
     }
 
-    _closeQuitDialog() {
+    _openQuitDialog() {
+        this._openKidConfirm({
+            title: 'Quitter le mode enfant ?',
+            text: 'La partie en cours du mode enfant sera effacée.',
+            goLabel: 'Oui, quitter',
+            goIcon: 'Logout',
+            onGo: () => prefs.setKidMode(false),
+        });
+    }
+
+    _openResignDialog() {
+        this._openKidConfirm({
+            title: 'Abandonner la partie ?',
+            text: "L'autre joueur gagnera la partie.",
+            goLabel: 'Oui, abandonner',
+            goIcon: 'Flag',
+            onGo: () => this.resign(),
+        });
+    }
+
+    _closeKidConfirm() {
         this.mainWrap.classList.remove('is-blurred');
-        if (this._quitBackdrop) {
-            this._quitBackdrop.remove();
-            this._quitBackdrop = null;
+        if (this._onConfirmKey) {
+            document.removeEventListener('keydown', this._onConfirmKey);
+            this._onConfirmKey = null;
         }
+        if (this._confirmBackdrop) {
+            this._confirmBackdrop.remove();
+            this._confirmBackdrop = null;
+        }
+    }
+
+    _renderTurnBubble() {
+        const s = this.state;
+        const pos = this.position;
+        const whiteTurn = pos.whiteToMove;
+
+        let accent;
+        if (s.result !== null) accent = '#237A36';
+        else if (this._blocked !== null) accent = '#C2410C';
+        else if (whiteTurn) accent = '#F59E0B';
+        else accent = '#7C3AED';
+        this.bubble.style.borderColor = accent;
+
+        const hideDot = s.result !== null || this._blocked !== null;
+        this.turnDot.className = `kid-turn-dot${hideDot ? ' hidden' : ''}${whiteTurn ? ' is-white' : ' is-black'}`;
+
+        const text = s.result || this._blocked || ((pos.inCheck ? 'Échec ! ' : '') + (whiteTurn ? 'Aux Blancs de jouer' : 'Aux Noirs de jouer'));
+        this.turnText.textContent = text;
+        this.turnText.classList.toggle('is-long', text.length > 22);
     }
 
     _renderBoard() {
@@ -516,9 +579,15 @@ export class KidFeature {
                     if (this._destroyed) return;
                     this._blocked = null;
                     this._blockedTimer = null;
-                    this._render();
-                }, 2600);
-                this._render();
+                    if (this._demoType === 0) {
+                        this._renderTurnBubble();
+                        this.layout.relayout();
+                        this.board._syncCanvasSize();
+                    }
+                }, 4000);
+                this._renderTurnBubble();
+                this.layout.relayout();
+                this.board._syncCanvasSize();
             },
             onMove: (m) => this.move(m),
         });
@@ -528,25 +597,9 @@ export class KidFeature {
     _render() {
         if (this._demoType > 0) return;
         const s = this.state;
-        const pos = this.position;
         const cur = s.cursor;
-        const whiteTurn = pos.whiteToMove;
 
-        let accent;
-        if (s.result !== null) accent = '#237A36';
-        else if (this._blocked !== null) accent = '#C2410C';
-        else if (whiteTurn) accent = '#F59E0B';
-        else accent = '#7C3AED';
-        this.bubble.style.borderColor = accent;
-
-        const hideDot = s.result !== null || this._blocked !== null;
-        this.turnDot.classList.toggle('hidden', hideDot);
-        this.turnDot.className = `kid-turn-dot${hideDot ? ' hidden' : ''}${whiteTurn ? ' is-white' : ' is-black'}`;
-
-        const text = s.result || this._blocked || ((pos.inCheck ? 'Échec ! ' : '') + (whiteTurn ? 'Aux Blancs de jouer' : 'Aux Noirs de jouer'));
-        this.turnText.textContent = text;
-        this.turnText.classList.toggle('is-long', text.length > 22);
-
+        this._renderTurnBubble();
         this._renderBoard();
 
         const backBtn = kidButton({
@@ -572,7 +625,7 @@ export class KidFeature {
                 icon: 'Flag',
                 enabled: s.line.size > 0,
                 className: 'kid-nav-main',
-                onClick: () => this.resign(),
+                onClick: () => this._openResignDialog(),
             })
             : kidButton({
                 label: 'Rejouer',

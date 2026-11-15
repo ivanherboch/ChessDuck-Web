@@ -5,7 +5,7 @@ import { ChessBoardView, EvalBarView } from '../ui/board.js';
 import { PlayerBarView } from '../ui/captured.js';
 import {
     FeedbackCardView, ModuleLayoutView, MoveStripView, Tone,
-    duckButton, duckIconButton, el, openConfirmDialog, stepTitle,
+    duckButton, duckIconButton, el, formatFr, hintButton, openConfirmDialog, stepTitle, turnOf,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
@@ -44,6 +44,7 @@ export class PlayFeature {
         this._palette = null;
         this._showCoords = true;
         this._destroyed = false;
+        this._stuck = null;
 
         this._gameGeneration = 0;
         this._aiAbort = null;
@@ -105,6 +106,7 @@ export class PlayFeature {
 
         this._onWindowResize = () => {
             if (this.review) this._renderReview();
+            else this._renderLive();
         };
         window.addEventListener('resize', this._onWindowResize);
 
@@ -210,20 +212,30 @@ export class PlayFeature {
         this.liveTitleEl = el('div', 'play-title', '');
         this.liveSubEl = el('div', 'play-subtitle', '');
         this.liveTitleCol.append(this.liveTitleEl, this.liveSubEl);
+        this.liveHeaderBtn = document.createElement('button');
+        this.liveHeaderBtn.type = 'button';
+        this.liveHeaderBtn.className = 'play-header-btn';
+        this.liveHeaderBtn.setAttribute('aria-label', 'Modifier les réglages de partie');
+        this.liveHeaderBtn.append(this.liveModeIcon, this.liveTitleCol);
+        this.liveHeaderBtn.addEventListener('click', () => {
+            feedback.key();
+            this._openGameSettings();
+        });
 
         this.liveFlipBtn = duckIconButton({ icon: 'SwapVert', ariaLabel: "Retourner l'échiquier", onClick: () => this.flip() });
         this.liveEvalBtn = duckIconButton({ icon: 'Insights', ariaLabel: "Jauge d'évaluation", accent: 'blue', selected: false, onClick: () => this.toggleEval() });
         this.liveHistBtn = duckIconButton({ icon: 'History', ariaLabel: 'Historique des parties', onClick: () => this._openHistory() });
         this.liveTuneBtn = duckIconButton({ icon: 'Tune', ariaLabel: 'Paramètres de partie', onClick: () => this._openGameSettings() });
-        this.liveTopBar.append(this.liveModeIcon, this.liveTitleCol, this.liveFlipBtn, this.liveEvalBtn, this.liveHistBtn, this.liveTuneBtn);
+        this.liveTopBar.append(this.liveHeaderBtn, this.liveFlipBtn, this.liveEvalBtn, this.liveHistBtn, this.liveTuneBtn);
 
         this.liveLayout.topSlot.appendChild(this.liveTopBar);
         this.liveLayout.overSlot.appendChild(this.overBar.el);
         this.liveLayout.boardHost.appendChild(this.liveBoardRow);
         this.liveLayout.underSlot.appendChild(this.underBar.el);
 
+        this.liveMoveTableWrap = el('div', 'rev-move-table hidden');
         this.liveActions = el('div', 'equal-row play-actions');
-        this.liveLayout.bottomSlot.append(this.liveMoveStrip.el, this.liveFeedback.el, this.liveActions);
+        this.liveLayout.bottomSlot.append(this.liveMoveStrip.el, this.liveFeedback.el, this.liveMoveTableWrap, this.liveActions);
     }
 
     _openHistory() {
@@ -241,7 +253,18 @@ export class PlayFeature {
             twoPlayers: st.twoPlayers,
             colorChoice: st.colorChoice,
             aiElo: st.aiElo,
-            onApply: (two, color, elo) => this.applySettings(two, color, elo),
+            onApply: (two, color, elo) => {
+                if (prefs.current.confirmActions && this.inProgress) {
+                    openConfirmDialog({
+                        title: 'Appliquer les nouveaux réglages ?',
+                        text: "Une nouvelle partie commencera : la partie en cours sera perdue (elle n'est pas enregistrée).",
+                        confirmLabel: 'Nouvelle partie',
+                        onConfirm: () => this.applySettings(two, color, elo),
+                    });
+                } else {
+                    this.applySettings(two, color, elo);
+                }
+            },
         });
     }
 
@@ -263,6 +286,7 @@ export class PlayFeature {
         if (this._aiTimer) { clearTimeout(this._aiTimer); this._aiTimer = null; }
         this._precomputeAbort?.abort();
         this._precomputeAbort = null;
+        this._stuck = null;
 
         let white;
         if (st.colorChoice === 0) white = true;
@@ -308,6 +332,7 @@ export class PlayFeature {
 
     hint() {
         if (!this.canPlay) return;
+        this._stuck = null;
         this.state.hintStage = Math.min(2, this.state.hintStage + 1);
         this._renderLive();
     }
@@ -318,6 +343,7 @@ export class PlayFeature {
         if (!this.canPlay || !pos.isLegal(m)) return;
         this._precomputeAbort?.abort();
         this._precomputeAbort = null;
+        this._stuck = null;
 
         const cur = s.cursor;
         const nl = s.line.copy(cur);
@@ -410,6 +436,7 @@ export class PlayFeature {
         this.state.anim = moveAnim(pos, move);
         this.state.thinking = false;
         this.state.hintStage = 0;
+        this._stuck = null;
 
         this._renderLive();
         const end = nl.end();
@@ -443,6 +470,7 @@ export class PlayFeature {
         if (s.thinking) return;
         const t = Math.max(0, Math.min(s.line.size, n));
         if (t === s.cursor) return;
+        this._stuck = null;
         s.anim = LinePlaybackController.transition(s.line, s.cursor, t);
         s.cursor = t;
         s.hintStage = 0;
@@ -469,6 +497,7 @@ export class PlayFeature {
         this._aiAbort?.abort();
         this._aiAbort = null;
         if (this._aiTimer) { clearTimeout(this._aiTimer); this._aiTimer = null; }
+        this._stuck = null;
         s.thinking = false;
         this._finish(GameEnd.NONE, s.twoPlayers ? s.line.last.whiteToMove : s.playerWhite);
     }
@@ -591,9 +620,12 @@ export class PlayFeature {
         const st = this.settings;
         const pos = this.currentPosition;
         const side = pos.whiteToMove ? 'Blancs' : 'Noirs';
+        const at = s.cursor === 0
+            ? 'Position de départ'
+            : `Coup ${turnOf(s.line, s.cursor - 1)} sur ${turnOf(s.line, s.line.size - 1)}`;
         if (s.result) {
             return {
-                text: (s.cursor < s.line.size ? `Coup ${s.cursor} / ${s.line.size}. ` : '') +
+                text: (s.cursor < s.line.size ? `${at}. ` : '') +
                     s.result.text +
                     (s.lastRecord ? ' Touchez « Analyser la partie » pour la revue commentée.' : ''),
                 tone: s.result.tone,
@@ -611,8 +643,8 @@ export class PlayFeature {
         if (s.cursor < s.line.size) {
             return {
                 text: this.canPlay
-                    ? `Coup ${s.cursor} / ${s.line.size}, trait aux ${side}. Jouez un autre coup ici pour reprendre la partie depuis cette position.`
-                    : `Coup ${s.cursor} / ${s.line.size}. Reculez ou avancez jusqu'à votre tour pour rejouer depuis ce moment.`,
+                    ? `${at}, trait aux ${side}. Jouez un autre coup ici pour reprendre la partie depuis cette position.`
+                    : `${at}. Reculez ou avancez jusqu'à votre tour pour rejouer depuis ce moment.`,
                 tone: Tone.INFO,
             };
         }
@@ -624,6 +656,19 @@ export class PlayFeature {
             return { text: `Nouvelle partie contre l'ordinateur (${s.aiElo} ELO). Vous jouez les ${side} : à vous de commencer !`, tone: Tone.INFO };
         }
         return { text: `${check}À vous de jouer (les ${side}).`, tone: Tone.INFO };
+    }
+
+    _renderLiveFeedbackOnly() {
+        if (this.review) return;
+        const wide = isTwoPane(window.innerWidth, window.innerHeight);
+        const status = this._liveStatus();
+        this.liveFeedback.update({
+            text: this._stuck || status.text,
+            tone: this._stuck ? Tone.GOLD : status.tone,
+        });
+        this.liveFeedback.el.classList.toggle('is-wide-live', wide);
+        this.liveLayout.relayout();
+        this.liveBoard._syncCanvasSize();
     }
 
     _renderLiveBoard() {
@@ -660,6 +705,10 @@ export class PlayFeature {
             kid: false,
             showCoords: this._showCoords,
             palette: c,
+            onIllegalTouch: this.canPlay ? (q) => {
+                this._stuck = GameLogic.whyStuck(pos, q);
+                this._renderLiveFeedbackOnly();
+            } : null,
             onMove: (m) => this.playerMove(m),
         });
 
@@ -689,6 +738,7 @@ export class PlayFeature {
     _renderLive() {
         if (this.review) return;
         const s = this.state;
+        const wide = isTwoPane(window.innerWidth, window.innerHeight);
         this.liveModeIcon.replaceChildren(createIcon(s.twoPlayers ? 'People' : 'SmartToy', 20));
         this.liveTitleEl.textContent = s.twoPlayers ? 'Partie à 2 joueurs' : `Ordinateur · ${s.aiElo}`;
         this.liveSubEl.textContent = s.twoPlayers
@@ -700,18 +750,32 @@ export class PlayFeature {
 
         this._renderLiveBoard();
 
-        this.liveMoveStrip.update({
-            line: s.line,
-            cursor: s.cursor,
-            onSelect: (n) => this.goTo(n),
-            onPrev: () => this.back(),
-            onNext: () => this.forward(),
-            prevEnabled: s.cursor > 0 && !s.thinking,
-            nextEnabled: s.cursor < s.line.size && !s.thinking,
-        });
+        this.liveMoveStrip.el.classList.toggle('hidden', wide);
+        if (!wide) {
+            this.liveMoveStrip.update({
+                line: s.line,
+                cursor: s.cursor,
+                onSelect: (n) => this.goTo(n),
+                onPrev: () => this.back(),
+                onNext: () => this.forward(),
+                prevEnabled: s.cursor > 0 && !s.thinking,
+                nextEnabled: s.cursor < s.line.size && !s.thinking,
+            });
+        }
 
         const status = this._liveStatus();
-        this.liveFeedback.update({ text: status.text, tone: status.tone });
+        this.liveFeedback.update({
+            text: this._stuck || status.text,
+            tone: this._stuck ? Tone.GOLD : status.tone,
+        });
+        this.liveFeedback.el.classList.toggle('is-wide-live', wide);
+
+        this.liveMoveTableWrap.classList.toggle('hidden', !wide);
+        if (wide) {
+            this._renderMoveTable(this.liveMoveTableWrap, s.line, s.cursor, [], (n) => {
+                if (!this.state.thinking) this.goTo(n);
+            });
+        }
 
         const undo = this.undoTarget();
         if (s.result !== null) {
@@ -736,16 +800,15 @@ export class PlayFeature {
             );
         } else {
             this.liveActions.replaceChildren(
-                duckButton({
-                    label: `Indice ${Math.min(2, s.hintStage + 1)}/2`,
-                    icon: 'Lightbulb',
-                    accent: 'green',
+                hintButton({
+                    stage: s.hintStage,
                     enabled: this.canPlay,
                     className: 'flex-1',
                     onClick: () => this.hint(),
                 }),
                 duckButton({
-                    label: s.twoPlayers ? 'Annuler le coup' : 'Annuler mon coup',
+                    label: 'Annuler',
+                    ariaLabel: s.twoPlayers ? 'Annuler le dernier coup' : 'Annuler mon dernier coup',
                     icon: 'Undo',
                     enabled: undo >= 0,
                     className: 'flex-1',
@@ -774,7 +837,6 @@ export class PlayFeature {
                 duckIconButton({
                     icon: 'Add',
                     ariaLabel: 'Nouvelle partie',
-                    accent: 'gold',
                     onClick: () => {
                         if (prefs.current.confirmActions && this.inProgress) {
                             openConfirmDialog({
@@ -844,13 +906,14 @@ export class PlayFeature {
         } catch {
             return;
         }
+        this._stuck = null;
         this._cachedLineRef = line;
         this._noteCache.clear();
         this.review = {
             record: g,
             line,
             cursor: 0,
-            playing: true,
+            playing: false,
             analysis: this.analyzer.analysisOf(g, line),
             flipped: Boolean(g.vsComputer && !g.playerWhite),
             evalOn: true,
@@ -860,7 +923,6 @@ export class PlayFeature {
         this.reviewLayout.el.classList.remove('hidden');
         this.reviewLayout.resetReserve();
         this._renderReview();
-        this._revAutoplay();
         this.analyzer.start(g, line);
     }
 
@@ -1018,7 +1080,11 @@ export class PlayFeature {
         this.revSummaryEl.appendChild(el('div', 'review-summary-title', 'Résumé de la partie'));
 
         if (ready < total) {
-            this.revSummaryEl.appendChild(el('div', 'muted-small mt-4', `Analyse des coups : ${ready} / ${total}…`));
+            this.revSummaryEl.appendChild(el(
+                'div',
+                'muted-small mt-4',
+                `Analyse : ${formatFr(ready)} position${ready > 1 ? 's' : ''} sur ${formatFr(total)}…`,
+            ));
             const prog = el('div', 'review-prog-track');
             const fill = el('div', 'review-prog-fill');
             fill.style.width = `${Math.round((ready / total) * 100)}%`;
@@ -1093,11 +1159,11 @@ export class PlayFeature {
         requestAnimationFrame(fitAligned);
     }
 
-    _renderMoveTable(line, cur, notes) {
+    _renderMoveTable(container, line, cur, notes, onSelect) {
         const first = line.size > 0 && !line.positions[0].whiteToMove ? 1 : 0;
         const rows = Math.floor((line.size + first + 1) / 2);
         const startMove = line.positions[0].fullmove;
-        this.revMoveTableWrap.replaceChildren();
+        container.replaceChildren();
         let activeBtn = null;
 
         for (let row = 0; row < rows; row++) {
@@ -1114,21 +1180,21 @@ export class PlayFeature {
                     btn.setAttribute('aria-label', `Aller au coup ${line.sans[i]}`);
                     btn.setAttribute('aria-current', String(current));
                     btn.appendChild(el('span', 'move-table-san', line.sans[i]));
-                    if (notes[i]) {
+                    if (notes?.[i]) {
                         const badge = el('span', 'move-table-badge', notes[i]);
                         badge.style.background = annotationColor(notes[i]);
                         btn.appendChild(badge);
                     }
                     btn.addEventListener('click', () => {
                         feedback.key();
-                        this.jumpReview(i + 1);
+                        onSelect(i + 1);
                     });
                     if (current) activeBtn = btn;
                     cell.appendChild(btn);
                 }
                 tr.appendChild(cell);
             }
-            this.revMoveTableWrap.appendChild(tr);
+            container.appendChild(tr);
         }
 
         if (activeBtn) {
@@ -1181,13 +1247,13 @@ export class PlayFeature {
             const text = cmt.text + (cur === line.size ? ' ' + ReviewComments.ending(g) : '');
             const note = notes[cur - 1];
             const title = stepTitle(line, cur, { note });
-            this.revFeedback.el.classList.toggle('is-wide-review', wide);
             this.revFeedback.update({ text, tone: cmt.tone, title });
+            this.revFeedback.el.classList.toggle('is-wide-review', wide);
         }
 
         this.revMoveTableWrap.classList.toggle('hidden', !wide);
         if (wide) {
-            this._renderMoveTable(line, cur, notes);
+            this._renderMoveTable(this.revMoveTableWrap, line, cur, notes, (n) => this.jumpReview(n));
         }
 
         this.revActions.replaceChildren(

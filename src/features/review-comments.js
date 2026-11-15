@@ -24,14 +24,14 @@ export class Voice {
         return `${this.name} (${this.white ? 'Blancs' : 'Noirs'})`;
     }
 
-    f(tu, il) {
-        return this.human ? tu : il;
+    f(vous, il) {
+        return this.human ? vous : il;
     }
 }
 
 const the = (t) => PieceLexiconFr.definite(t);
 const it = (t) => PieceLexiconFr.pronoun(t);
-const poss = (v, t) => v.f(PieceLexiconFr.possessive(t, true), PieceLexiconFr.possessive(t, false));
+const poss = (v, t) => v.f(`votre ${PieceLexiconFr.name(t)}`, PieceLexiconFr.possessive(t));
 
 /** Tendance de la partie, du point de vue des Blancs : -2 … +2. */
 function bucket(evalWhite) {
@@ -64,13 +64,13 @@ function describe(v, p, m, san, prev) {
         const victim = p.capturedType(m);
         base = (prev != null && prev.to === m.to ? 'reprend en capturant ' : 'capture ') + the(victim) + ` en ${sqName(m.to)}`;
     } else if (p.fullmove <= 12 && (t === KNIGHT || t === BISHOP) && rankOf(m.from) === (v.white ? 0 : 7)) {
-        base = `développe ${PieceLexiconFr.possessive(t, false)}`;
+        base = `développe ${PieceLexiconFr.possessive(t)}`;
     } else if (t === PAWN && fileOf(m.to) >= 3 && fileOf(m.to) <= 4 && rankOf(m.to) >= 3 && rankOf(m.to) <= 4) {
         base = 'avance un pion au centre';
     } else if (t === PAWN) {
         base = `avance son pion en ${sqName(m.to)}`;
     } else {
-        base = `joue ${PieceLexiconFr.possessive(t, false)} en ${sqName(m.to)}`;
+        base = `joue ${PieceLexiconFr.possessive(t)} en ${sqName(m.to)}`;
     }
     const tail = san.endsWith('#') ? ' et fait échec et mat !' : (san.endsWith('+') ? ', avec échec.' : '.');
     return `${v.label} ${base}${tail}`;
@@ -88,9 +88,9 @@ function explain(v, p, m, san, a0, a1) {
     const oppMate = mateFor(a1.eval, !p.whiteToMove);
     if (oppMate !== null && reply) {
         if (oppMate <= 2) {
-            return `en jouant ${san}, ${v.f('tu permets', 'il permet')} à l'adversaire de faire échec et mat en ${oppMate} (${after.san(reply)}).`;
+            return `en jouant ${san}, ${v.f('vous permettez', 'il permet')} à l'adversaire de faire échec et mat en ${oppMate} (${after.san(reply)}).`;
         }
-        return `${san} laisse l'adversaire lancer une attaque décisive contre ${v.f('ton', 'son')} roi.`;
+        return `${san} laisse l'adversaire lancer une attaque décisive contre ${v.f('votre', 'son')} roi.`;
     }
     // 2. Une pièce est laissée en prise.
     if (reply && after.isCapture(reply)) {
@@ -99,7 +99,7 @@ function explain(v, p, m, san, a0, a1) {
         if (PIECE_VALUES[victim] > gained) {
             const rs = after.san(reply);
             return reply.to === m.to
-                ? `en jouant ${san}, ${v.f('tu exposes', 'il expose')} ${poss(v, victim)} : ${rs} peut ${it(victim)} capturer.`
+                ? `en jouant ${san}, ${v.f('vous exposez', 'il expose')} ${poss(v, victim)} : ${rs} peut ${it(victim)} capturer.`
                 : `${san} laisse ${poss(v, victim)} en ${sqName(reply.to)} sans protection suffisante : ${rs} ${it(victim)} capture.`;
         }
     }
@@ -111,7 +111,7 @@ function explain(v, p, m, san, a0, a1) {
             const victim = p.capturedType(best);
             const free = p.attackers(best.to, !p.whiteToMove).length === 0;
             if (free || PIECE_VALUES[victim] >= PIECE_VALUES[bt]) {
-                return `${v.f('tu as', 'il a')} manqué l'occasion de capturer ${the(victim)} en ${sqName(best.to)} avec ${bs} : cela ${v.f("t'", 'lui ')}aurait donné l'avantage.`;
+                return `${v.f('vous avez', 'il a')} manqué l'occasion de capturer ${the(victim)} en ${sqName(best.to)} avec ${bs} : cela ${v.f('vous ', 'lui ')}aurait donné l'avantage.`;
             }
         }
         // 4. Une pièce attaquée n'a pas été mise à l'abri.
@@ -120,23 +120,23 @@ function explain(v, p, m, san, a0, a1) {
         }
         // 5. Un échec fort a été manqué.
         if (bs.endsWith('+')) {
-            return `${v.f('tu aurais dû', 'il aurait dû')} donner échec avec ${bs} pour garder l'initiative.`;
+            return `${v.f('vous auriez dû', 'il aurait dû')} donner échec avec ${bs} pour garder l'initiative.`;
         }
         // 6. Principes d'ouverture.
         if (p.isCastle(best)) {
-            return `${v.f('tu aurais dû', 'il aurait dû')} mettre ${v.f('ton', 'son')} roi à l'abri en roquant (${bs}).`;
+            return `${v.f('vous auriez dû', 'il aurait dû')} mettre ${v.f('votre', 'son')} roi à l'abri en roquant (${bs}).`;
         }
         if (p.fullmove <= 14) {
             if ((bt === KNIGHT || bt === BISHOP) && rankOf(best.from) === (p.whiteToMove ? 0 : 7)) {
-                return `${v.f('tu aurais dû', 'il aurait dû')} développer ${poss(v, bt)} avec ${bs} pour prendre part à la bataille du centre.`;
+                return `${v.f('vous auriez dû', 'il aurait dû')} développer ${poss(v, bt)} avec ${bs} pour prendre part à la bataille du centre.`;
             }
             if (bt === PAWN && fileOf(best.to) >= 3 && fileOf(best.to) <= 4 && rankOf(best.to) >= 2 && rankOf(best.to) <= 5) {
-                return `${v.f('tu aurais dû', 'il aurait dû')} occuper le centre avec ${bs}.`;
+                return `${v.f('vous auriez dû', 'il aurait dû')} occuper le centre avec ${bs}.`;
             }
         }
         return `${bs} était plus fort que ${san}.`;
     }
-    return `${san} affaiblit ${v.f('ta', 'sa')} position.`;
+    return `${san} affaiblit ${v.f('votre', 'sa')} position.`;
 }
 
 export const ReviewComments = {
@@ -190,9 +190,9 @@ export const ReviewComments = {
             const left = mateFor(a1.eval, p.whiteToMove);
             const now = left === null
                 ? ` Après ${san}, le mat n'est plus forcé.`
-                : ` Après ${san}, ${v.f('il te faut', 'il lui faut')} encore ${left} ${left > 1 ? 'coups' : 'coup'} pour mater.`;
+                : ` Après ${san}, ${v.f('il vous faut', 'il lui faut')} encore ${left} ${left > 1 ? 'coups' : 'coup'} pour mater.`;
             return {
-                text: `⚠️ Mat en ${mm} manqué · ${v.label} : ${v.f('tu pouvais', 'il pouvait')} gagner tout de suite` +
+                text: `⚠️ Mat en ${mm} manqué · ${v.label} : ${v.f('vous pouviez', 'il pouvait')} gagner tout de suite` +
                     (bestMove ? `, ${bestMove} ${how}.` : '.') + now + trend,
                 tone: Tone.BAD,
             };

@@ -3,12 +3,11 @@ import { db } from './data/db.js';
 import { prefs } from './data/prefs.js';
 import { AcademyFeature } from './features/academy.js';
 import { KidFeature } from './features/kid.js';
-import { openMemoSheet } from './features/memo-sheet.js';
 import { NotationFeature } from './features/notation.js';
 import { PlayFeature } from './features/play.js';
 import { PuzzlesFeature } from './features/puzzles.js';
 import { openSettingsSheet } from './features/settings-sheet.js';
-import { duckButton, duckIconButton, el } from './ui/common.js';
+import { duckIconButton, el } from './ui/common.js';
 import { feedback } from './ui/feedback.js';
 import { createIcon } from './ui/icons.js';
 import { KidColors, applyThemeToDom, computeIosTopGap, isIosDevice, isTwoPane, resolvePalette } from './ui/theme.js';
@@ -17,7 +16,7 @@ const TABS = [
     { label: 'Notation', icon: 'KeyboardOutlined', selectedIcon: 'Keyboard' },
     { label: 'Académie', icon: 'SchoolOutlined', selectedIcon: 'School' },
     { label: 'Problèmes', icon: 'ExtensionOutlined', selectedIcon: 'Extension' },
-    { label: 'Jeu Libre', icon: 'Knight', selectedIcon: 'Knight' },
+    { label: 'Jeu Libre', icon: 'KnightOutlined', selectedIcon: 'Knight' },
 ];
 
 const TAB_STORAGE_KEY = 'chessduck_active_tab';
@@ -163,19 +162,12 @@ class ChessDuckApp {
         mascot.className = 'app-logo';
 
         const title = el('h1', 'app-title', 'ChessDuck');
-        this.memoBtn = duckButton({
-            label: 'Mémo',
-            icon: 'MenuBook',
-            accent: 'blue',
-            ariaLabel: 'Mémo anglais : lettres et symboles FIDE',
-            onClick: () => openMemoSheet(),
-        });
         this.settingsBtn = duckIconButton({
             icon: 'Settings',
             ariaLabel: 'Paramètres',
             onClick: () => openSettingsSheet(),
         });
-        this.headerEl.append(mascot, title, this.memoBtn, this.settingsBtn);
+        this.headerEl.append(mascot, title, this.settingsBtn);
 
         this.contentEl = el('main', 'app-content');
         this.mainEl.append(this.headerEl, this.contentEl);
@@ -210,7 +202,6 @@ class ChessDuckApp {
             if (i !== index) f.onDeactivate?.();
             f.el.classList.toggle('hidden', i !== index);
         });
-        this.memoBtn.classList.toggle('hidden', index !== 0);
         this._syncNavSelection();
         feat.onActivate?.();
         requestAnimationFrame(() => {

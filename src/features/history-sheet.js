@@ -1,7 +1,9 @@
 import {
-    createSheet, duckButton, duckChip, duckIconButton, el, emptyState, openConfirmDialog,
+    createSheet, duckButton, duckChip, duckIconButton, el, emptyState, infoPill, openConfirmDialog,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
+import { createIcon } from '../ui/icons.js';
+import { Analysis } from './game-logic.js';
 
 export function formatDate(t) {
     const d = new Date(t);
@@ -32,6 +34,9 @@ export function openHistorySheet({ games: initialGames, subscribeGames, onDelete
         }
         for (const g of games) {
             const card = el('div', 'history-card');
+            card.setAttribute('role', 'button');
+            card.tabIndex = 0;
+
             const top = el('div', 'history-card-top');
             let label;
             let toneCls;
@@ -63,7 +68,8 @@ export function openHistorySheet({ games: initialGames, subscribeGames, onDelete
             const delBtn = duckIconButton({
                 icon: 'Delete',
                 ariaLabel: 'Supprimer cette partie',
-                onClick: () => {
+                onClick: (e) => {
+                    e?.stopPropagation?.();
                     openConfirmDialog({
                         title: 'Supprimer cette partie ?',
                         text: `Elle disparaîtra définitivement de l'historique (${formatDate(g.date)}).`,
@@ -72,10 +78,13 @@ export function openHistorySheet({ games: initialGames, subscribeGames, onDelete
                     });
                 },
             });
+            delBtn.addEventListener('click', (e) => e.stopPropagation());
             top.appendChild(delBtn);
 
             const plyCount = g.moves ? g.moves.trim().split(/\s+/).filter(Boolean).length : 0;
             const nbMoves = Math.floor((plyCount + 1) / 2);
+            const analysed = Analysis.decodeAll(g.analysis || '', plyCount + 1).every((a) => a !== null);
+
             let players;
             if (!g.whiteName) {
                 players = `contre ${(g.opponent || '').replace('Stockfish', 'Ordinateur')}` +
@@ -90,18 +99,34 @@ export function openHistorySheet({ games: initialGames, subscribeGames, onDelete
 
             const playersEl = el('div', 'history-players', players);
             const metaEl = el('div', 'history-meta', `${formatDate(g.date)} · ${g.result} par ${g.reason} · ${nbMoves} coups`);
-            const replayBtn = duckButton({
-                label: 'Rejouer sur l’échiquier',
-                icon: 'PlayArrow',
-                accent: 'blue',
-                filled: true,
-                className: 'full-w',
-                onClick: () => {
-                    sheet.close();
-                    onReplay(g);
-                },
+            const footer = el('div', 'history-card-footer');
+            footer.append(
+                infoPill({ text: 'Revue commentée', icon: 'Analytics', accent: 'blue' }),
+                analysed
+                    ? infoPill({ text: 'Analyse prête', icon: 'CheckCircle', accent: 'green' })
+                    : infoPill({ text: "Analyse à l'ouverture", accent: 'gold' }),
+                el('span', 'history-card-spacer'),
+                createIcon('KeyboardArrowRight', 20, 'history-card-arrow'),
+            );
+
+            card.setAttribute('aria-label', `${label}, ${players}, ${formatDate(g.date)}. Ouvrir la revue commentée`);
+            const triggerReplay = () => {
+                feedback.key();
+                sheet.close();
+                onReplay(g);
+            };
+            card.addEventListener('click', (e) => {
+                if (delBtn.contains(e.target)) return;
+                triggerReplay();
             });
-            card.append(top, playersEl, metaEl, replayBtn);
+            card.addEventListener('keydown', (e) => {
+                if ((e.key === 'Enter' || e.key === ' ') && e.target === card) {
+                    e.preventDefault();
+                    triggerReplay();
+                }
+            });
+
+            card.append(top, playersEl, metaEl, footer);
             listWrap.appendChild(card);
         }
     }

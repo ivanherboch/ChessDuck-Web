@@ -68,9 +68,10 @@ export function duckIconButton({
     className = '',
 }) {
     const on = selected === true || filled;
+    const toggleOff = selected === false;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `duck-icon-btn${on ? ' is-on' : ''}${accent ? ` accent-${accent}` : ''} ${className}`.trim();
+    btn.className = `duck-icon-btn${on ? ' is-on' : ''}${toggleOff ? ' is-toggle-off' : ''}${accent ? ` accent-${accent}` : ''} ${className}`.trim();
     btn.disabled = !enabled;
     btn.title = ariaLabel;
     btn.setAttribute('aria-label', ariaLabel + (badge ? ` (${badge})` : ''));
@@ -85,6 +86,33 @@ export function duckIconButton({
         onClick?.(e);
     });
     return btn;
+}
+
+export function hintLabel(stage) {
+    return stage >= 2 ? 'Indice utilisé' : `Indice ${stage + 1}/2`;
+}
+
+export function hintButton({ stage, onClick, enabled = true, className = '' }) {
+    return duckButton({
+        label: hintLabel(stage),
+        onClick,
+        enabled: enabled && stage < 2,
+        accent: 'green',
+        icon: 'Lightbulb',
+        className,
+    });
+}
+
+export function hintIconButton({ stage, onClick, enabled = true, className = '' }) {
+    return duckIconButton({
+        icon: 'Lightbulb',
+        ariaLabel: hintLabel(stage),
+        onClick,
+        enabled: enabled && stage < 2,
+        accent: 'green',
+        badge: stage > 0 ? `${stage}/2` : null,
+        className,
+    });
 }
 
 export function duckChip({ label, selected, onClick, icon = null, accent = 'gold', className = '' }) {
@@ -165,7 +193,7 @@ export class FeedbackCardView {
         this._moreBtn = document.createElement('button');
         this._moreBtn.type = 'button';
         this._moreBtn.className = 'feedback-more hidden';
-        this._moreBtn.textContent = 'Lire la suite';
+        this._moreBtn.append(el('span', '', 'Lire la suite'), createIcon('KeyboardArrowRight', 18));
         this._actionWrap = el('div', 'feedback-action hidden');
         this.el.append(this._row, this._moreBtn, this._actionWrap);
 
@@ -494,9 +522,10 @@ export function createSheet(title, onCloseCallback = null) {
  * en paysage tablette/bureau (w > h * 1.15), échiquier à gauche et panneau de commandes à droite.
  */
 export class ModuleLayoutView {
-    constructor({ bottomMin = 170, adaptive = true } = {}) {
+    constructor({ bottomMin = 170, adaptive = true, underBoardFullWidth = false } = {}) {
         this.bottomMin = bottomMin;
         this.adaptive = adaptive;
+        this.underBoardFullWidth = underBoardFullWidth;
         this.el = el('div', 'module-layout');
         this.topSlot = el('div', 'module-top');
         this.boardPane = el('div', 'module-board-pane');
@@ -687,10 +716,10 @@ export class ModuleLayoutView {
         this.boardHost.style.width = `${side + this._evalPad}px`;
         this.boardHost.style.height = `${side}px`;
         this.overSlot.style.width = `${side}px`;
-        const hasPills = Boolean(this.underSlot.querySelector('.notation-under-row'));
-        this.underSlot.style.width = hasPills ? `${Math.min(availW, Math.max(side, 290))}px` : `${side}px`;
+        const underFull = this.underBoardFullWidth || Boolean(this.underSlot.querySelector('.notation-under-row'));
+        this.underSlot.style.width = underFull ? `${availW}px` : `${side}px`;
         this.overSlot.style.marginLeft = `${this._evalPad}px`;
-        this.underSlot.style.marginLeft = hasPills ? '0px' : `${this._evalPad}px`;
+        this.underSlot.style.marginLeft = underFull ? '0px' : `${this._evalPad}px`;
         this._refitFeedbackCards();
     }
 }

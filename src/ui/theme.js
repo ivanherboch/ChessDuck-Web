@@ -33,6 +33,8 @@ export const NightColors = {
     coordInk: '#5C3D24',
     coordPill: 'rgba(240, 217, 181, 0.85)',
     select: '#10B981',
+    lastMoveTint: 'rgba(247, 236, 94, 0.40)',
+    checkGlow: '#EF4444',
     kid: false,
 };
 
@@ -59,6 +61,8 @@ export const DayColors = {
     coordInk: '#5C3D24',
     coordPill: 'rgba(240, 217, 181, 0.85)',
     select: '#10B981',
+    lastMoveTint: 'rgba(247, 236, 94, 0.40)',
+    checkGlow: '#EF4444',
     kid: false,
 };
 
@@ -85,8 +89,55 @@ export const KidColors = {
     coordInk: '#17594B',
     coordPill: 'rgba(255, 255, 255, 0.80)',
     select: '#FF9F1C',
+    lastMoveTint: 'rgba(247, 236, 94, 0.40)',
+    checkGlow: '#EF4444',
     kid: true,
 };
+
+export const DuckRadius = Object.freeze({
+    S: 8,
+    M: 12,
+    L: 16,
+    Kid: 24,
+});
+
+function makeBoardTheme(ordinal, key, label, light, dark, coordInk) {
+    return Object.freeze({
+        ordinal,
+        key,
+        label,
+        light,
+        dark,
+        coordInk,
+        applyTo(c) {
+            return Object.freeze({
+                ...c,
+                squareLight: light,
+                squareDark: dark,
+                coordInk,
+                coordPill: hexToRgba(light, 0.85),
+            });
+        },
+    });
+}
+
+const BOARD_THEMES = [
+    makeBoardTheme(0, 'WOOD', 'Bois classique', '#F0D9B5', '#B58863', '#5C3D24'),
+    makeBoardTheme(1, 'SLATE', 'Ardoise', '#DEE3E6', '#8CA2AD', '#2B3A42'),
+    makeBoardTheme(2, 'TOURNAMENT', 'Vert tournoi', '#EEEED2', '#769656', '#34481F'),
+    makeBoardTheme(3, 'AMETHYST', 'Améthyste et lin', '#F1E9DC', '#9F86C0', '#45305F'),
+];
+
+export const BoardTheme = Object.freeze({
+    WOOD: BOARD_THEMES[0],
+    SLATE: BOARD_THEMES[1],
+    TOURNAMENT: BOARD_THEMES[2],
+    AMETHYST: BOARD_THEMES[3],
+    entries: Object.freeze(BOARD_THEMES),
+    of(index) {
+        return BOARD_THEMES[index] || BOARD_THEMES[0];
+    },
+});
 
 function makePalette(ordinal, key, label, description, night, day) {
     return Object.freeze({
@@ -263,10 +314,10 @@ export function isDarkTheme(themeMode) {
     return true;
 }
 
-export function resolvePalette({ themeMode, kidMode, palette = 0 }) {
+export function resolvePalette({ themeMode, kidMode, palette = 0, boardTheme = 0 }) {
     if (kidMode) return KidColors;
     const dark = isDarkTheme(themeMode);
-    return DuckPalette.of(palette).colors(dark);
+    return BoardTheme.of(boardTheme).applyTo(DuckPalette.of(palette).colors(dark));
 }
 
 export function applyThemeToDom(c) {

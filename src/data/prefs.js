@@ -1,8 +1,11 @@
 const STORAGE_KEY = 'chessduck_v2_settings';
 
+export const DEFAULT_ELO = 1200;
+
 export const DEFAULT_SETTINGS = Object.freeze({
     themeMode: 2,          // 0 = système, 1 = Jour, 2 = Nuit
     palette: 0,            // 0 = Ardoise & Or, 1 = Améthyste, 2 = Noyer, 3 = Graphite & Rose, 4 = Bleu-Orange
+    boardTheme: 0,         // 0 = Bois classique, 1 = Ardoise, 2 = Vert tournoi, 3 = Améthyste et lin
     coords: true,
     confirmActions: true,
     notationBest: 0,
@@ -15,10 +18,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
     knownThemePuzzles: [],
     pseudo: 'Joueur',
     pseudo2: 'Joueur 2',
-    elo: 1200,
+    elo: DEFAULT_ELO,
     twoPlayers: false,
     colorChoice: 0,        // 0 = Blancs, 1 = Aléatoire, 2 = Noirs
-    aiElo: 1200,
+    aiElo: DEFAULT_ELO,
     puzzleBand: 0,         // 0 = Tous, 1 = Débutant, 2 = Intermédiaire, 3 = Avancé, 4 = Expert
     puzzleTheme: '',
     puzzleId: '',
@@ -42,6 +45,7 @@ function loadInitial() {
             ...parsed,
             themeMode: clampInt(parsed.themeMode, 0, 2, DEFAULT_SETTINGS.themeMode),
             palette: clampInt(parsed.palette, 0, 4, DEFAULT_SETTINGS.palette),
+            boardTheme: clampInt(parsed.boardTheme, 0, 3, DEFAULT_SETTINGS.boardTheme),
             coords: parsed.coords !== undefined ? Boolean(parsed.coords) : DEFAULT_SETTINGS.coords,
             confirmActions: parsed.confirmActions !== undefined ? Boolean(parsed.confirmActions) : DEFAULT_SETTINGS.confirmActions,
             notationBest: Number.isInteger(parsed.notationBest) && parsed.notationBest >= 0 ? parsed.notationBest : 0,
@@ -88,6 +92,7 @@ class PrefsStore {
 
     setThemeMode(v) { this._update({ themeMode: clampInt(v, 0, 2, DEFAULT_SETTINGS.themeMode) }); }
     setPalette(v) { this._update({ palette: clampInt(v, 0, 4, DEFAULT_SETTINGS.palette) }); }
+    setBoardTheme(v) { this._update({ boardTheme: clampInt(v, 0, 3, DEFAULT_SETTINGS.boardTheme) }); }
     setCoords(v) { this._update({ coords: Boolean(v) }); }
     setConfirmActions(v) { this._update({ confirmActions: Boolean(v) }); }
     setNotationBest(v) {

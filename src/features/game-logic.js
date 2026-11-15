@@ -1,6 +1,7 @@
 import {
-    GameEnd, KING, PAWN, PIECE_VALUES, pieceType,
+    GameEnd, KING, PAWN, PIECE_VALUES, Position, pieceType, sqName,
 } from '../core/chess.js';
+import { PieceLexiconFr } from '../core/piece-fr.js';
 import { MATE, mateFor, winPercent } from '../core/stockfish.js';
 
 /** Analyse d'une position : évaluations (point de vue des Blancs) du meilleur et du 2e coup. */
@@ -76,6 +77,29 @@ function isSacrifice(before, m) {
 }
 
 export const GameLogic = {
+    /**
+     * Pourquoi la pièce en sq (au camp qui a le trait) ne peut pas bouger, en une phrase : roi en échec,
+     * pièce clouée sur son roi, ou simplement aucune case libre.
+     */
+    whyStuck(p, sq) {
+        const t = pieceType(p.board[sq]);
+        const name = `${PieceLexiconFr.definiteCapitalized(t)} en ${sqName(sq)}`;
+        const f = PieceLexiconFr.isFeminine(t);
+        if (p.inCheck) {
+            return `Votre roi est en échec : ${PieceLexiconFr.definite(t)} en ${sqName(sq)} ne peut pas parer l'échec. Protégez d'abord votre roi.`;
+        }
+        if (t !== KING) {
+            const king = p.kingSquare(p.whiteToMove);
+            const nextBoard = p.board.slice();
+            nextBoard[sq] = 0;
+            const without = new Position(nextBoard, p.whiteToMove, p.castling, p.ep, p.halfmove, p.fullmove);
+            if (king >= 0 && without.isAttacked(king, !p.whiteToMove)) {
+                return `${name} est ${f ? 'clouée' : 'cloué'} : ${f ? 'si elle bougeait' : "s'il bougeait"}, votre roi serait en échec.`;
+            }
+        }
+        return `${name} n'a aucune case libre pour l'instant.`;
+    },
+
     /** Nouvel ELO selon la formule FIDE (K = 32). score : 1 victoire, 0,5 nulle, 0 défaite. */
     newElo(elo, opponent, score, k = 32) {
         const expected = 1.0 / (1.0 + Math.pow(10.0, (opponent - elo) / 400.0));

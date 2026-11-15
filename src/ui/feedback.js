@@ -103,28 +103,29 @@ export class FeedbackService {
         } catch { /* unsupported on iOS Safari */ }
     }
 
-    _playBuffer(ctx) {
+    _playBuffer(ctx, gainValue = MOVE_GAIN) {
         if (!ctx || !this._buffer) return;
         try {
             const src = ctx.createBufferSource();
             src.buffer = this._buffer;
             const gain = ctx.createGain();
-            gain.gain.value = MOVE_GAIN;
+            gain.gain.value = gainValue;
             src.connect(gain);
             gain.connect(ctx.destination);
             src.start(0);
         } catch { /* ignore */ }
     }
 
-    _playAfterLoad(ctx) {
+    _playAfterLoad(ctx, gainValue = MOVE_GAIN) {
         this._loadSound().then(() => {
             if (this.soundEnabled && this._ctx === ctx && ctx.state === 'running' && this._buffer) {
-                this._playBuffer(ctx);
+                this._playBuffer(ctx, gainValue);
             }
         }).catch(() => {});
     }
 
-    move() {
+    move({ capture = false, check = false, promotion = false } = {}) {
+        const gainValue = capture ? Math.min(1, MOVE_GAIN * 1.35) : MOVE_GAIN;
         if (this.soundEnabled && this._canUseMedia()) {
             const ctx = this._ensureCtx();
             if (ctx) {
@@ -134,19 +135,19 @@ export class FeedbackService {
                         if (p && typeof p.then === 'function') {
                             p.then(() => {
                                 if (!this.soundEnabled || this._ctx !== ctx || ctx.state !== 'running') return;
-                                if (this._buffer) this._playBuffer(ctx);
-                                else this._playAfterLoad(ctx);
+                                if (this._buffer) this._playBuffer(ctx, gainValue);
+                                else this._playAfterLoad(ctx, gainValue);
                             }).catch(() => {});
                         }
                     } catch { /* ignore */ }
                 } else if (this._buffer) {
-                    this._playBuffer(ctx);
+                    this._playBuffer(ctx, gainValue);
                 } else {
-                    this._playAfterLoad(ctx);
+                    this._playAfterLoad(ctx, gainValue);
                 }
             }
         }
-        this._buzz(12);
+        this._buzz(promotion ? [12, 40, 18] : check ? [14, 50, 14] : capture ? 18 : 12);
     }
 
     key() { this._buzz(8); }

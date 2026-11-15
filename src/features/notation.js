@@ -6,11 +6,12 @@ import { prefs } from '../data/prefs.js';
 import { ChessBoardView } from '../ui/board.js';
 import {
     FeedbackCardView, ModuleLayoutView, Tone,
-    duckButton, duckIconButton, el, infoPill, loadingState,
+    duckButton, duckIconButton, el, hintIconButton, hintLabel, infoPill, loadingState,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 import { moveAnim } from '../ui/line-playback.js';
+import { openMemoSheet } from './memo-sheet.js';
 import { NotationLogic } from './notation-logic.js';
 
 const LEVEL_SHORT = ['Tous', 'Bases', 'Prises', 'Roques'];
@@ -18,7 +19,7 @@ const LEVEL_SHORT = ['Tous', 'Bases', 'Prises', 'Roques'];
 export class NotationFeature {
     constructor() {
         this.el = el('div', 'feature-root');
-        this.layout = new ModuleLayoutView({ bottomMin: 298 });
+        this.layout = new ModuleLayoutView({ bottomMin: 298, underBoardFullWidth: true });
         this.board = new ChessBoardView();
         this.feedbackCard = new FeedbackCardView();
         this.loadingEl = loadingState("Préparation de l'exercice…");
@@ -126,11 +127,17 @@ export class NotationFeature {
         };
         document.addEventListener('click', this._docClickBound, true);
 
+        this.memoBtn = duckIconButton({
+            icon: 'MenuBook',
+            ariaLabel: 'Mémo anglais : lettres et symboles FIDE',
+            accent: 'blue',
+            onClick: () => openMemoSheet(),
+        });
         this.flipBtn = duckIconButton({ icon: 'SwapVert', ariaLabel: "Retourner l'échiquier", onClick: () => this.flip() });
         this.replayBtn = duckIconButton({ icon: 'Replay', ariaLabel: 'Revoir le coup', onClick: () => this.replay() });
-        this.hintBtn = duckIconButton({ icon: 'Lightbulb', ariaLabel: 'Indice', accent: 'green', onClick: () => this.hint() });
-        this.nextBtn = duckIconButton({ icon: 'SkipNext', ariaLabel: 'Exercice suivant', accent: 'gold', onClick: () => this.next() });
-        this.topRow.append(this.levelWrap, this.flipBtn, this.replayBtn, this.hintBtn, this.nextBtn);
+        this.hintBtn = hintIconButton({ stage: 0, onClick: () => this.hint() });
+        this.nextBtn = duckIconButton({ icon: 'SkipNext', ariaLabel: "Passer à l'exercice suivant", accent: 'gold', onClick: () => this.next() });
+        this.topRow.append(this.levelWrap, this.memoBtn, this.flipBtn, this.replayBtn, this.hintBtn, this.nextBtn);
         this.layout.topSlot.appendChild(this.topRow);
 
         // Board
@@ -148,10 +155,9 @@ export class NotationFeature {
 
         this.inputRow = el('div', 'notation-input-row');
         this.inputBox = el('div', 'notation-input-box');
-        this.clearIconBtn = duckIconButton({ icon: 'Close', ariaLabel: 'Tout effacer', onClick: () => this.clear() });
         this.clearSpacer = el('div', 'notation-clear-spacer');
         this.inputText = el('span', 'notation-input-text is-empty', 'Votre réponse…');
-        this.inputBox.append(this.clearIconBtn, this.clearSpacer, this.inputText);
+        this.inputBox.append(this.clearSpacer, this.inputText);
 
         this.bsBtn = document.createElement('button');
         this.bsBtn.type = 'button';
@@ -372,7 +378,7 @@ export class NotationFeature {
         if (key.startsWith('O-O')) {
             if (s.input.length > 0 && !s.input.startsWith('O-O')) {
                 s.tone = Tone.GOLD;
-                s.message = "Le roque s'écrit seul (O-O ou O-O-O). Effacez d'abord la saisie : touche « Tout effacer » ou appui long sur ⌫.";
+                s.message = "Le roque s'écrit seul (O-O ou O-O-O). Effacez d'abord la saisie : appui long sur la touche Effacer.";
                 this._render();
                 return false;
             }
@@ -386,7 +392,12 @@ export class NotationFeature {
             this._render();
             return false;
         }
-        if (s.input.length + key.length > 9) return false;
+        if (s.input.length + key.length > 9) {
+            s.tone = Tone.GOLD;
+            s.message = "Votre réponse est déjà complète : un coup s'écrit en 9 signes au plus. Validez-la ou effacez un caractère.";
+            this._render();
+            return false;
+        }
         s.input += key;
         this._render();
         return true;
@@ -470,15 +481,20 @@ export class NotationFeature {
             chk.style.visibility = i === s.level ? 'visible' : 'hidden';
         });
 
-        this.hintBtn.disabled = s.solved;
+        const hLbl = hintLabel(s.hintStage);
+        const hBadge = s.hintStage > 0 ? `${s.hintStage}/2` : null;
+        this.hintBtn.disabled = s.solved || s.hintStage >= 2;
+        this.hintBtn.title = hLbl;
+        this.hintBtn.setAttribute('aria-label', hLbl + (hBadge ? ` (${hBadge})` : ''));
         const oldBadge = this.hintBtn.querySelector('.duck-icon-badge');
-        if (s.hintStage > 0) {
-            if (oldBadge) oldBadge.textContent = `${s.hintStage}/2`;
-            else this.hintBtn.appendChild(el('span', 'duck-icon-badge', `${s.hintStage}/2`));
+        if (hBadge) {
+            if (oldBadge) oldBadge.textContent = hBadge;
+            else this.hintBtn.appendChild(el('span', 'duck-icon-badge', hBadge));
         } else if (oldBadge) {
             oldBadge.remove();
         }
-        this.nextBtn.classList.toggle('is-on', s.solved);
+        // Une fois la réponse trouvée, le bouton « Suivant » du bas suffit : pas de doublon en haut.
+        this.nextBtn.classList.toggle('hidden', s.solved);
 
         // Under-board pills
         const newOrient = infoPill({
@@ -502,9 +518,6 @@ export class NotationFeature {
         this.feedbackCard.update({ text: s.message, tone: s.tone });
 
         // Input bar
-        const showClear = s.input.length > 0 && !s.solved;
-        this.clearIconBtn.classList.toggle('hidden', !showClear);
-        this.clearSpacer.classList.toggle('hidden', showClear);
         this.inputBox.classList.toggle('is-solved', s.solved);
         this.inputText.textContent = s.input || 'Votre réponse…';
         this.inputText.classList.toggle('is-empty', !s.input.length);

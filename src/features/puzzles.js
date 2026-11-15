@@ -7,15 +7,24 @@ import { ChessBoardView } from '../ui/board.js';
 import { createSideDot } from '../ui/captured.js';
 import {
     FeedbackCardView, ModuleLayoutView, Tone, createSheet,
-    duckButton, duckIconButton, el, emptyState, formatFr, loadingState,
+    duckButton, duckIconButton, el, emptyState, formatFr, hintButton, loadingState,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 import { moveAnim, undoAnim } from '../ui/line-playback.js';
 import { openExportSheet } from './export-sheet.js';
+import { GameLogic } from './game-logic.js';
 import { openPuzzleCatalog } from './puzzle-catalog.js';
 
 export const REFUTE_HOLD = 4000;
+const AUTO_UNDO = ' Le coup sera annulé automatiquement.';
+
+/** Filtre actif du catalogue, en clair : « Intermédiaire · Clouage », « Libre · 12 résolus »… */
+function filterLabel(band, theme, solved) {
+    const name = PuzzleThemes.byKey[theme]?.name || PuzzleThemes.groupOf(theme);
+    if (!name && band === 0) return `Libre · ${formatFr(solved)} résolu${solved > 1 ? 's' : ''}`;
+    return [band > 0 ? PuzzleThemes.BANDS[band] : null, name || 'Tous les thèmes'].filter(Boolean).join(' · ');
+}
 
 export class PuzzlesFeature {
     constructor(engine) {
@@ -37,6 +46,7 @@ export class PuzzlesFeature {
             solved: false,
             anim: null,
             hintStage: 0,
+            stuck: null,
             message: 'Chargement du problème…',
             tone: Tone.INFO,
             refute: null,
@@ -139,7 +149,7 @@ export class PuzzlesFeature {
     _buildDom() {
         this.topBar = el('div', 'top-bar');
         this.catalogBtn = duckButton({
-            label: `0 / ${formatFr(PUZZLE_COUNT)}`,
+            label: filterLabel(this.state.band, this.state.theme, 0),
             icon: 'Extension',
             accent: 'blue',
             onClick: () => this._openCatalog(),
@@ -159,13 +169,19 @@ export class PuzzlesFeature {
         this.layout.topSlot.append(this.topBar, this.metaRow);
         this.layout.boardHost.appendChild(this.board.el);
 
-        this.refuteBarWrap = el('div', 'refute-progress-wrap hidden');
+        this.refuteRow = el('div', 'puzzle-refute-row hidden');
+        this.refuteBarWrap = el('div', 'refute-progress-wrap');
         this.refuteBarFill = el('div', 'refute-progress-fill');
         this.refuteBarWrap.appendChild(this.refuteBarFill);
+        this.holdRefuteBtn = duckIconButton({
+            icon: 'Pause',
+            ariaLabel: 'Garder la position affichée',
+            onClick: () => this.holdRefutation(),
+        });
+        this.refuteRow.append(this.refuteBarWrap, this.holdRefuteBtn);
 
         this.navRow = el('div', 'equal-row puzzle-nav-row');
-        this.bottomEmptyHost = el('div', 'hidden');
-        this.layout.bottomSlot.append(this.bottomEmptyHost, this.feedbackCard.el, this.refuteBarWrap, this.navRow);
+        this.layout.bottomSlot.append(this.feedbackCard.el, this.refuteRow, this.navRow);
     }
 
     _openCatalog() {
@@ -247,6 +263,7 @@ export class PuzzlesFeature {
             solved: false,
             anim: null,
             hintStage: 0,
+            stuck: null,
             refute: null,
             empty: false,
             themeRevealed: Boolean(prefs.current.knownThemePuzzles?.includes(p.id)),
@@ -345,6 +362,7 @@ export class PuzzlesFeature {
         s.cursor = t;
         s.anim = undoAnim(s.line.positions[t], s.line.moves[t]);
         s.hintStage = 0;
+        s.stuck = null;
         this._render();
     }
 
@@ -354,6 +372,7 @@ export class PuzzlesFeature {
         s.anim = moveAnim(s.line.positions[s.cursor], s.line.moves[s.cursor]);
         s.cursor += 1;
         s.hintStage = 0;
+        s.stuck = null;
         this._render();
     }
 
@@ -368,6 +387,7 @@ export class PuzzlesFeature {
         if (!this.canPlay(s)) return;
         const stage = Math.min(2, s.hintStage + 1);
         s.hintStage = stage;
+        s.stuck = null;
         s.tone = Tone.GOLD;
         s.message = stage === 1
             ? 'Indice 1/2 : la pièce à jouer est surlignée en vert.'
@@ -381,6 +401,7 @@ export class PuzzlesFeature {
         const p = s.puzzle;
         if (!line || !p || !this.canPlay(s)) return 0;
         this._cancelTimers();
+        s.stuck = null;
 
         const cur = s.cursor;
         const pos = line.positions[cur];
@@ -437,6 +458,7 @@ export class PuzzlesFeature {
         s.progress = Math.max(cur, Math.min(s.progress, cur));
         s.cursor = cur;
         s.hintStage = 0;
+        s.stuck = null;
         s.tone = Tone.BAD;
         s.anim = moveAnim(pos, m);
         s.refute = { position: after, last: m, arrow: null };
@@ -497,7 +519,7 @@ export class PuzzlesFeature {
         };
         s.refuteUntil = performance.now() + REFUTE_HOLD;
         s.refuteHold = REFUTE_HOLD;
-        s.message = `Réfutation : après ${san}, les ${oppName} répondent ${replySan}${detail} Le coup sera annulé automatiquement.`;
+        s.message = `Réfutation : après ${san}, les ${oppName} répondent ${replySan}${detail}${AUTO_UNDO}`;
         this._render();
 
         this._playTimer = setTimeout(() => {
@@ -506,11 +528,25 @@ export class PuzzlesFeature {
         }, REFUTE_HOLD);
     }
 
+    /** Suspend l'annulation automatique : la réfutation reste affichée jusqu'à « Réessayer ». */
+    holdRefutation() {
+        const s = this.state;
+        if (!s.refute || !s.refuteUntil) return;
+        if (this._playTimer) { clearTimeout(this._playTimer); this._playTimer = null; }
+        this._refuteToken += 1;
+        if (this._refuteRaf) { cancelAnimationFrame(this._refuteRaf); this._refuteRaf = 0; }
+        s.refuteUntil = 0;
+        const base = s.message.endsWith(AUTO_UNDO) ? s.message.slice(0, -AUTO_UNDO.length) : s.message;
+        s.message = `${base} Prenez votre temps, puis touchez Réessayer.`;
+        this._render();
+    }
+
     retry() {
         if (!this.state.refute) return;
         this._cancelTimers();
         this.state.refute = null;
         this.state.anim = null;
+        this.state.stuck = null;
         this.state.tone = Tone.INFO;
         this.state.refuteUntil = 0;
         this.state.message = 'Position rétablie : à vous de rejouer.';
@@ -519,7 +555,7 @@ export class PuzzlesFeature {
 
     _ensureVisible() {
         const s = this.state;
-        if (!s.puzzle || !s.line) {
+        if (!s.puzzle || !s.line || s.empty) {
             if (s.empty) {
                 this.loadingEl.classList.add('hidden');
                 this.layout.el.remove();
@@ -548,10 +584,10 @@ export class PuzzlesFeature {
         if (this._refuteRaf) { cancelAnimationFrame(this._refuteRaf); this._refuteRaf = 0; }
         const s = this.state;
         if (this._destroyed || !s.refute || !s.refuteUntil) {
-            this.refuteBarWrap.classList.add('hidden');
+            this.refuteRow.classList.add('hidden');
             return;
         }
-        this.refuteBarWrap.classList.remove('hidden');
+        this.refuteRow.classList.remove('hidden');
         const tick = () => {
             if (this._destroyed) return;
             const left = Math.max(0, s.refuteUntil - performance.now());
@@ -564,9 +600,30 @@ export class PuzzlesFeature {
         this._refuteRaf = requestAnimationFrame(tick);
     }
 
+    _onIllegalTouch(pos, sq) {
+        const s = this.state;
+        s.stuck = GameLogic.whyStuck(pos, sq);
+        const p = s.puzzle;
+        if (!p) return;
+        const type = PuzzleThemes.primary(p.themes);
+        const visible = this.themeVisible;
+        const title = visible ? `Type de problème : ${type.name}` : 'Thème masqué (mode libre)';
+        const actionEl = !visible
+            ? duckButton({
+                label: 'Révéler le thème',
+                icon: 'Visibility',
+                accent: 'blue',
+                variant: 'outlined',
+                onClick: () => this.revealTheme(),
+            })
+            : null;
+        this.feedbackCard.update({ text: s.stuck, tone: Tone.GOLD, title, actionEl });
+        this.layout.relayout();
+    }
+
     _renderBoard() {
         const s = this.state;
-        if (this._destroyed || !s.puzzle || !s.line || !this._palette) return;
+        if (this._destroyed || !s.puzzle || !s.line || s.empty || !this._palette) return;
         const r = s.refute;
         const cur = Math.max(0, Math.min(s.line.size, s.cursor));
         const pos = r ? r.position : s.line.positions[cur];
@@ -589,6 +646,7 @@ export class PuzzlesFeature {
             kid: false,
             showCoords: this._showCoords,
             palette: this._palette,
+            onIllegalTouch: canPlay ? (sq) => this._onIllegalTouch(pos, sq) : null,
             onMove: (m) => {
                 const code = this.onMove(m);
                 if (code === 2) feedback.success();
@@ -603,14 +661,18 @@ export class PuzzlesFeature {
         this._ensureVisible();
         const p = s.puzzle;
         const line = s.line;
-        if (!p || !line) return;
+        if (!p || !line || s.empty) return;
 
         const type = PuzzleThemes.primary(p.themes);
         const visible = this.themeVisible;
 
-        this.catalogBtn.querySelector('.duck-btn-label').textContent = `${formatFr(this.solvedIds.size)} / ${formatFr(PUZZLE_COUNT)}`;
-        this.catalogBtn.setAttribute('aria-label', `Catalogue des problèmes : ${formatFr(this.solvedIds.size)} résolus sur ${formatFr(PUZZLE_COUNT)}`);
-        this.randomBtn.classList.toggle('is-on', s.solved || s.empty);
+        const filter = filterLabel(s.band, s.theme, this.solvedIds.size);
+        this.catalogBtn.querySelector('.duck-btn-label').textContent = filter;
+        this.catalogBtn.setAttribute(
+            'aria-label',
+            `Catalogue des problèmes : ${filter}, ${formatFr(this.solvedIds.size)} résolus sur ${formatFr(PUZZLE_COUNT)}`,
+        );
+        this.randomBtn.classList.toggle('is-on', s.solved);
         this.historyBtn.disabled = !this.recents.length;
 
         const newDot = createSideDot(this.playerWhite);
@@ -619,81 +681,60 @@ export class PuzzlesFeature {
         this.turnLabelEl.textContent = this.playerWhite ? 'Trait aux Blancs' : 'Trait aux Noirs';
         this.infoLabelEl.textContent = `${visible ? type.name : 'Thème masqué'} · ${PuzzleThemes.BANDS[PuzzleThemes.bandOf(p.rating)]} ${p.rating} · #${p.id}`;
 
-        if (s.empty) {
-            this.feedbackCard.el.classList.add('hidden');
-            this.navRow.classList.add('hidden');
-            this.bottomEmptyHost.classList.remove('hidden');
-            this.bottomEmptyHost.replaceChildren(emptyState({
-                icon: 'SearchOff',
-                title: 'Plus aucun problème',
-                message: 'Aucun problème ne correspond à ces filtres.',
-                actionLabel: 'Ouvrir le catalogue',
-                onAction: () => this._openCatalog(),
-                secondaryLabel: 'Réinitialiser les filtres',
-                onSecondary: () => this.setFilter(0, ''),
-            }));
+        const showTip = visible && !s.refute && !s.solved && s.tone === Tone.INFO;
+        const text = s.stuck || (s.message + (showTip ? `\n\nConseil : ${type.tip}` : ''));
+        const title = visible ? `Type de problème : ${type.name}` : 'Thème masqué (mode libre)';
+        const actionEl = !visible
+            ? duckButton({
+                label: 'Révéler le thème',
+                icon: 'Visibility',
+                accent: 'blue',
+                variant: 'outlined',
+                onClick: () => this.revealTheme(),
+            })
+            : null;
+        this.feedbackCard.update({ text, tone: s.stuck ? Tone.GOLD : s.tone, title, actionEl });
+
+        this._updateCountdown();
+
+        const backBtn = duckIconButton({
+            icon: 'KeyboardArrowLeft',
+            ariaLabel: 'Coup précédent',
+            enabled: !s.refute && s.cursor > 0,
+            onClick: () => this.back(),
+        });
+        let midBtn;
+        if (s.refute) {
+            midBtn = duckButton({
+                label: 'Réessayer',
+                icon: 'Undo',
+                accent: 'red',
+                filled: true,
+                onClick: () => this.retry(),
+            });
+        } else if (s.solved) {
+            midBtn = duckButton({
+                label: 'Problème aléatoire',
+                icon: 'Casino',
+                accent: 'gold',
+                filled: true,
+                onClick: () => this.random(),
+            });
         } else {
-            this.bottomEmptyHost.classList.add('hidden');
-            this.feedbackCard.el.classList.remove('hidden');
-            this.navRow.classList.remove('hidden');
-
-            const showTip = visible && !s.refute && !s.solved && s.tone === Tone.INFO;
-            const text = s.message + (showTip ? `\nConseil : ${type.tip}` : '');
-            const title = visible ? `Type de problème : ${type.name}` : 'Thème masqué (mode libre)';
-            const actionEl = !visible
-                ? duckButton({
-                    label: 'Révéler le thème',
-                    icon: 'Visibility',
-                    accent: 'blue',
-                    variant: 'outlined',
-                    onClick: () => this.revealTheme(),
-                })
-                : null;
-            this.feedbackCard.update({ text, tone: s.tone, title, actionEl });
-
-            this._updateCountdown();
-
-            const backBtn = duckIconButton({
-                icon: 'KeyboardArrowLeft',
-                ariaLabel: 'Coup précédent',
-                enabled: !s.refute && s.cursor > 0,
-                onClick: () => this.back(),
+            midBtn = hintButton({
+                stage: s.hintStage,
+                enabled: this.canPlay(s),
+                onClick: () => this.hint(),
             });
-            let midBtn;
-            if (s.refute) {
-                midBtn = duckButton({
-                    label: 'Réessayer',
-                    icon: 'Undo',
-                    accent: 'red',
-                    filled: true,
-                    onClick: () => this.retry(),
-                });
-            } else if (s.solved) {
-                midBtn = duckButton({
-                    label: 'Problème aléatoire',
-                    icon: 'Casino',
-                    accent: 'gold',
-                    filled: true,
-                    onClick: () => this.random(),
-                });
-            } else {
-                midBtn = duckButton({
-                    label: `Indice ${Math.min(2, s.hintStage + 1)}/2`,
-                    icon: 'Lightbulb',
-                    accent: 'green',
-                    enabled: this.canPlay(s),
-                    onClick: () => this.hint(),
-                });
-            }
-            midBtn.style.flex = '1';
-            const fwdBtn = duckIconButton({
-                icon: 'KeyboardArrowRight',
-                ariaLabel: 'Coup suivant',
-                enabled: !s.refute && s.cursor < s.progress,
-                onClick: () => this.forward(),
-            });
-            this.navRow.replaceChildren(backBtn, midBtn, fwdBtn);
         }
+        midBtn.style.flex = '1';
+        const fwdBtn = duckIconButton({
+            icon: 'KeyboardArrowRight',
+            ariaLabel: 'Coup suivant',
+            enabled: !s.refute && s.cursor < s.progress,
+            onClick: () => this.forward(),
+        });
+        this.navRow.replaceChildren(backBtn, midBtn, fwdBtn);
 
         this.layout.relayout();
         this._renderBoard();

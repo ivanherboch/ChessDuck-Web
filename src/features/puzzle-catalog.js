@@ -23,14 +23,19 @@ function highlightNode(text, query) {
     return span;
 }
 
-function buildThemeRow({ name, goal, count, selected, icon = null, onClick }) {
+function buildThemeRow({ name, goal, count, selected, icon = null, trailing = null, expanded = null, onClick }) {
     const enabled = !count || count.total > 0;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.disabled = !enabled;
     btn.className = `theme-row${selected ? ' is-selected' : ''}`;
     btn.setAttribute('aria-pressed', String(Boolean(selected)));
-    if (count) btn.setAttribute('aria-description', `${count.solved} résolus sur ${count.total}`);
+    if (expanded !== null) btn.setAttribute('aria-expanded', String(Boolean(expanded)));
+    const descParts = [
+        expanded !== null ? (expanded ? 'déplié' : 'replié') : null,
+        count ? `${count.solved} résolus sur ${count.total}` : null,
+    ].filter(Boolean);
+    if (descParts.length) btn.setAttribute('aria-description', descParts.join(', '));
     if (icon) {
         const ic = createIcon(icon, 20, 'theme-row-icon');
         btn.appendChild(ic);
@@ -44,6 +49,9 @@ function buildThemeRow({ name, goal, count, selected, icon = null, onClick }) {
     if (count) {
         const cntEl = el('span', `theme-row-count${count.solved > 0 ? ' has-solved' : ''}`, `${formatFr(count.solved)} / ${formatFr(count.total)}`);
         btn.appendChild(cntEl);
+    }
+    if (trailing) {
+        btn.appendChild(createIcon(trailing, 20, 'theme-row-trailing'));
     }
     btn.addEventListener('click', () => {
         if (!enabled) return;
@@ -62,7 +70,7 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
     let countsToken = 0;
     let searchToken = 0;
     let counts = new Map();
-    let sugg = { query: '', items: [], more: false };
+    let sugg = { query: '', items: [], more: 0 };
     let searchTimer = null;
     const expanded = new Set();
     const initialGroup = PuzzleThemes.byKey[state.theme]?.group;
@@ -115,6 +123,13 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
 
     b.append(searchRow, suggHost, matchesHost, errorEl, bandTitle, bandRow, bandNote, themeTitle, themeNote, allThemesHost, groupsHost);
 
+    function matchingThemes(rawQuery) {
+        const q = normalizeForSearch(rawQuery.trim().replace(/^#/, ''));
+        if (q.length < 2) return [];
+        return PuzzleThemes.all.filter((t) =>
+            normalizeForSearch(t.name).includes(q) || normalizeForSearch(t.goal).includes(q));
+    }
+
     async function submitId() {
         const raw = query.trim();
         if (!raw || closed || opening) return;
@@ -122,11 +137,23 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
         try {
             const ok = await onOpenById(raw);
             if (closed) return;
-            if (ok) sheet.close();
-            else {
-                notFound = true;
-                renderSearchExtras();
+            if (ok) {
+                sheet.close();
+                return;
             }
+            if (sugg.items.length === 1) {
+                await onOpenSuggestion(sugg.items[0].id);
+                if (!closed) sheet.close();
+                return;
+            }
+            const themeMatches = matchingThemes(raw);
+            if (themeMatches.length > 0) {
+                onSetFilter(band, themeMatches[0].key);
+                sheet.close();
+                return;
+            }
+            notFound = true;
+            renderSearchExtras();
         } finally {
             opening = false;
         }
@@ -150,7 +177,7 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
         const raw = query.trim().replace(/^#/, '').toLowerCase();
         const tok = ++searchToken;
         if (!raw) {
-            sugg = { query: '', items: [], more: false };
+            sugg = { query: '', items: [], more: 0 };
             renderSuggestions();
             return;
         }
@@ -165,7 +192,7 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
                         type: (PuzzleThemes.byKey[it.primaryTheme] || PuzzleThemes.primary('')).name,
                         rating: it.rating,
                     })),
-                    more: total > items.length,
+                    more: Math.max(0, total - items.length),
                 };
                 renderSuggestions();
             } catch { /* ignore */ }
@@ -198,7 +225,13 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
             });
             box.appendChild(row);
         }
-        if (sugg.more) box.appendChild(el('div', 'sugg-more', '…'));
+        if (sugg.more > 0) {
+            box.appendChild(el(
+                'div',
+                'sugg-more',
+                `Affinez l'identifiant pour voir ${sugg.more > 1 ? `les ${formatFr(sugg.more)} autres résultats` : "l'autre résultat"}.`,
+            ));
+        }
         suggHost.appendChild(box);
     }
 
@@ -209,22 +242,18 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
             errorEl.textContent = `Aucun problème « ${query.trim()} » parmi les ${formatFr(PUZZLE_COUNT)} embarqués. Vérifiez l'identifiant (majuscules et minuscules comptent).`;
         }
 
-        const q = normalizeForSearch(query.trim().replace(/^#/, ''));
+        const matches = matchingThemes(query);
         matchesHost.replaceChildren();
-        if (q.length >= 2) {
-            const matches = PuzzleThemes.all.filter((t) =>
-                normalizeForSearch(t.name).includes(q) || normalizeForSearch(t.goal).includes(q));
-            if (matches.length) {
-                matchesHost.appendChild(el('h3', 'section-title', 'Thèmes correspondants'));
-                for (const t of matches) {
-                    matchesHost.appendChild(buildThemeRow({
-                        name: t.name,
-                        goal: t.goal,
-                        count: counts.get(t.key),
-                        selected: state.theme === t.key,
-                        onClick: () => { onSetFilter(band, t.key); sheet.close(); },
-                    }));
-                }
+        if (matches.length) {
+            matchesHost.appendChild(el('h3', 'section-title', 'Thèmes correspondants'));
+            for (const t of matches) {
+                matchesHost.appendChild(buildThemeRow({
+                    name: t.name,
+                    goal: t.goal,
+                    count: counts.get(t.key),
+                    selected: state.theme === t.key,
+                    onClick: () => { onSetFilter(band, t.key); sheet.close(); },
+                }));
             }
         }
     }
@@ -260,29 +289,29 @@ export function openPuzzleCatalog({ state, onSetBand, onSetFilter, onOpenById, o
             const gKey = PuzzleThemes.groupKey(g);
             const isOpen = expanded.has(g);
             const wrap = el('div', 'theme-group-wrap');
-            const headRow = el('div', 'theme-group-head');
-            const rowWrap = el('div', 'flex-1');
-            rowWrap.appendChild(buildThemeRow({
+            wrap.appendChild(buildThemeRow({
                 name: g,
                 goal: PuzzleThemes.GROUP_GOALS[g] || '',
                 count: counts.get(gKey),
                 selected: state.theme === gKey,
                 icon: 'Folder',
-                onClick: () => { onSetFilter(band, gKey); sheet.close(); },
-            }));
-            const expBtn = duckIconButton({
-                icon: isOpen ? 'ExpandLess' : 'ExpandMore',
-                ariaLabel: isOpen ? `Replier les thèmes : ${g}` : `Déplier les thèmes : ${g}`,
+                trailing: isOpen ? 'ExpandLess' : 'ExpandMore',
+                expanded: isOpen,
                 onClick: () => {
                     if (isOpen) expanded.delete(g);
                     else expanded.add(g);
                     renderThemes();
                 },
-            });
-            headRow.append(rowWrap, expBtn);
-            wrap.appendChild(headRow);
+            }));
             if (isOpen) {
                 const sub = el('div', 'theme-group-children');
+                sub.appendChild(duckChip({
+                    label: 'Toute la famille',
+                    selected: state.theme === gKey,
+                    accent: 'gold',
+                    className: 'theme-family-chip',
+                    onClick: () => { onSetFilter(band, gKey); sheet.close(); },
+                }));
                 for (const t of PuzzleThemes.all.filter((it) => it.group === g)) {
                     sub.appendChild(buildThemeRow({
                         name: t.name,

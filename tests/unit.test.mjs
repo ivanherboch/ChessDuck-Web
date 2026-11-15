@@ -294,8 +294,8 @@ test('GameLogic, Stockfish helpers & ReviewComments', () => {
 
     const endMsg = ReviewComments.ending({ ...game, reason: 'échec et mat' });
     assert.equal(endMsg, "Fin de la partie : victoire de l'ordinateur (Noirs) par échec et mat.");
-    assert.equal(new Voice('Moi', true, true).f('tu', 'il'), 'tu');
-    assert.equal(new Voice("L'ordinateur", false, false).f('tu', 'il'), 'il');
+    assert.equal(new Voice('Moi', true, true).f('vous', 'il'), 'vous');
+    assert.equal(new Voice("L'ordinateur", false, false).f('vous', 'il'), 'il');
 });
 
 test('WCAG 2.1 AA contrast across Day, Night and Kid palettes', async () => {
@@ -492,7 +492,7 @@ test('v2.3.1..v2.4.2: mateFor, Analysis.decided, evalShort rounding & missedMate
         new Analysis(MATE - 1, 500, 'e1e8'),
         new Analysis(MATE - 5, null, 'g8h8'),
     ]);
-    assert.match(cStillMate.text, /il te faut encore 3 coups pour mater/);
+    assert.match(cStillMate.text, /il vous faut encore 3 coups pour mater/);
 
     const cLostMate = ReviewComments.comment(g, line, 0, [
         new Analysis(MATE - 1, 500, 'e1e8'),
@@ -1244,15 +1244,15 @@ test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', 
     assert.match(settingsSrc, /Voix en mode enfant/);
 });
 
-test('v2.4.8: version bump & Notation FIDE keyboard WCAG target dimensions', async () => {
+test('v2.5.1: version bump & Notation FIDE keyboard WCAG target dimensions', async () => {
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
     const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
     const notationSrc = fs.readFileSync(path.join(ROOT, 'src/features/notation.js'), 'utf8');
 
-    assert.match(swSrc, /chessduck-v2\.4\.8-/);
-    assert.match(settingsSrc, /v2\.4\.8/);
-    assert.match(cssSrc, /v2\.4\.8/);
+    assert.match(swSrc, /chessduck-v2\.5\.1-/);
+    assert.match(settingsSrc, /v2\.5\.1/);
+    assert.match(cssSrc, /v2\.5\.1/);
     assert.match(notationSrc, /bottomMin:\s*298/);
 
     assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*48px/);
@@ -1693,6 +1693,180 @@ test('Voice & sound mobile fixes: Android cold start, -network scoring, post-sil
     }
 });
 
+test('v2.5.1: Chess rules — enPassantFollowsTheRules, stalemateIsADraw & Sam Loyd stalemate', () => {
+    const l = Line.fromSan(START_FEN, 'e4 a6 e5 d5'.split(' '));
+    assert.equal(l.last.isLegal(Move.fromUci('e5d6')), true);
+    const ep = l.last.play(Move.fromUci('e5d6'));
+    assert.equal(ep.board[sqFromName('d5')], 0);
 
+    const late = Line.fromSan(START_FEN, 'e4 a6 e5 d5 Nf3 h6'.split(' '));
+    assert.equal(late.last.isLegal(Move.fromUci('e5d6')), false);
 
+    const pinned = Position.fromFen('8/8/8/KPp4r/8/8/8/7k w - c6 0 1');
+    assert.equal(pinned.isLegal(Move.fromUci('b5c6')), false);
 
+    assert.equal(
+        Position.fromFen('4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1').key,
+        Position.fromFen('4k3/8/8/8/4P3/8/8/4K3 b - - 0 1').key,
+    );
+
+    const stale = Line.fromSan('7k/8/5QK1/8/8/8/8/8 w - - 0 1', ['Qf7']);
+    assert.equal(stale.last.legalMoves.length, 0);
+    assert.equal(stale.last.inCheck, false);
+    assert.equal(stale.end(), GameEnd.STALEMATE);
+    assert.equal(GameLogic.endText(GameEnd.STALEMATE), 'pat');
+    assert.equal(Analysis.decided(stale.last, GameEnd.STALEMATE).eval, 0);
+
+    // Pat le plus rapide connu (Sam Loyd, 10 coups), vérifié comme nul (pat)
+    const loyd = Line.fromSan(
+        START_FEN,
+        'e3 a5 Qh5 Ra6 Qxa5 h5 h4 Rah6 Qxc7 f6 Qxd7+ Kf7 Qxb7 Qd3 Qxb8 Qh7 Qxc8 Kg6 Qe6'.split(' '),
+    );
+    assert.equal(loyd.end(), GameEnd.STALEMATE);
+});
+
+test('v2.5.1: GameLogic.whyStuck & Analysis.equals', () => {
+    const pinned = Position.fromFen('4k3/4q3/8/8/8/8/4N3/4K3 w - - 0 1');
+    assert.equal(
+        GameLogic.whyStuck(pinned, sqFromName('e2')),
+        "Le cavalier en e2 est cloué : s'il bougeait, votre roi serait en échec.",
+    );
+
+    const check = Position.fromFen('4k3/8/8/8/8/8/4q3/R3K3 w - - 0 1');
+    assert.ok(GameLogic.whyStuck(check, sqFromName('a1')).startsWith('Votre roi est en échec : la tour en a1'));
+
+    const blocked = Position.fromFen('4k3/8/8/8/8/4p3/4P3/K7 w - - 0 1');
+    assert.equal(
+        GameLogic.whyStuck(blocked, sqFromName('e2')),
+        "Le pion en e2 n'a aucune case libre pour l'instant.",
+    );
+
+    const a1 = new Analysis(120, 10, 'e2e4');
+    const a2 = new Analysis(120, 10, 'e2e4');
+    const a3 = new Analysis(120, 15, 'd2d4');
+    assert.equal(a1.equals(a2), true);
+    assert.equal(a1.equals(a3), false);
+    assert.equal(a1.equals(null), false);
+});
+
+test('v2.5.1: BoardTheme WCAG 2.1 AA coord contrast & ShareCard integration', async () => {
+    const { BoardTheme, NightColors, DayColors } = await import('../src/ui/theme.js');
+
+    const parseColor = (str) => {
+        if (str.startsWith('#')) {
+            const h = str.slice(1);
+            return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255, 1];
+        }
+        const m = str.match(/rgba?\(\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\s*\)/);
+        return [parseFloat(m[1]) / 255, parseFloat(m[2]) / 255, parseFloat(m[3]) / 255, m[4] !== undefined ? parseFloat(m[4]) : 1];
+    };
+    const over = (fgStr, bgStr) => {
+        const fg = parseColor(fgStr);
+        const bg = parseColor(bgStr);
+        const a = fg[3];
+        return [fg[0] * a + bg[0] * (1 - a), fg[1] * a + bg[1] * (1 - a), fg[2] * a + bg[2] * (1 - a)];
+    };
+    const relLum = ([r, g, b]) => {
+        const lin = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    };
+    const ratio = (fg, bg) => {
+        const l1 = relLum(fg.length === 3 ? fg : parseColor(fg));
+        const l2 = relLum(bg.length === 3 ? bg : parseColor(bg));
+        const [hi, lo] = l1 >= l2 ? [l1, l2] : [l2, l1];
+        return (hi + 0.05) / (lo + 0.05);
+    };
+
+    assert.equal(BoardTheme.entries.length, 4);
+    for (const theme of BoardTheme.entries) {
+        for (const base of [NightColors, DayColors]) {
+            const c = theme.applyTo(base);
+            assert.equal(c.squareLight, theme.light);
+            assert.equal(c.squareDark, theme.dark);
+            const rLight = ratio(c.coordInk, over(c.coordPill, c.squareLight));
+            const rDark = ratio(c.coordInk, over(c.coordPill, c.squareDark));
+            assert.ok(rLight >= 4.5, `${theme.label} coord/light: ${rLight.toFixed(2)}`);
+            assert.ok(rDark >= 4.5, `${theme.label} coord/dark: ${rDark.toFixed(2)}`);
+        }
+    }
+
+    const style = shareStyleFromSettings({ shareFormat: 'PORTRAIT', shareLight: false, palette: 1, boardTheme: 2 });
+    assert.equal(style.palette.ordinal, 1);
+    assert.equal(style.board, BoardTheme.TOURNAMENT);
+    assert.equal(BoardTheme.of(99), BoardTheme.WOOD);
+});
+
+test('v2.5.1: Prefs boardTheme sanitization, clamping & DEFAULT_ELO', async () => {
+    const prevWin = globalThis.window;
+    const store = new Map();
+    store.set('chessduck_v2_settings', JSON.stringify({ boardTheme: 99 }));
+    globalThis.window = {
+        localStorage: {
+            getItem: (k) => (store.has(k) ? store.get(k) : null),
+            setItem: (k, v) => { store.set(k, v); },
+        },
+    };
+    try {
+        const { prefs, DEFAULT_ELO, DEFAULT_SETTINGS } = await import('../src/data/prefs.js?sanit=251');
+        assert.equal(DEFAULT_ELO, 1200);
+        assert.equal(DEFAULT_SETTINGS.boardTheme, 0);
+        assert.equal(prefs.current.boardTheme, 0);
+        prefs.setBoardTheme(3);
+        assert.equal(prefs.current.boardTheme, 3);
+        prefs.setBoardTheme(-1);
+        assert.equal(prefs.current.boardTheme, 0);
+    } finally {
+        if (prevWin === undefined) delete globalThis.window;
+        else globalThis.window = prevWin;
+    }
+});
+
+test('v2.5.1: ReviewComments vouvoiement (human 2nd person plural, computer 3rd person)', () => {
+    const rec = (vsComputer, playerWhite, whiteName, blackName) => ({
+        date: 0, opponent: '', vsComputer, playerWhite, result: '0-1', reason: 'abandon',
+        whiteName, blackName, opponentElo: 1200,
+    });
+    const line = Line.fromSan(START_FEN, 'e4 e5 Qh5 Nc6 Qxf7+ Kxf7'.split(' '));
+    const analysis = [
+        new Analysis(30, 20, 'e2e4'),
+        new Analysis(30, 20, 'e7e5'),
+        new Analysis(30, 25, 'g1f3'),
+        new Analysis(-20, -30, 'b8c6'),
+        new Analysis(10, 0, 'f1c4'),
+        new Analysis(-800, -900, 'e8f7'),
+        new Analysis(-820, null, 'd2d4'),
+    ];
+
+    const cHuman = ReviewComments.comment(rec(true, true, 'Ivan', '🤖 Ordinateur'), line, 4, analysis);
+    assert.equal(cHuman.tone, 'bad');
+    assert.ok(cHuman.text.startsWith('Gaffe · Ivan (Blancs)'));
+    assert.ok(cHuman.text.includes('vous exposez votre dame') && cHuman.text.includes('Kxf7'), cHuman.text);
+    assert.equal(/ tu /i.test(cHuman.text), false);
+
+    const cBot = ReviewComments.comment(rec(true, false, '🤖 Ordinateur', 'Ivan'), line, 4, analysis);
+    assert.ok(cBot.text.startsWith("Gaffe · L'ordinateur (Blancs)"));
+    assert.ok(cBot.text.includes('il expose sa dame'), cBot.text);
+    assert.equal(/ vous /i.test(cBot.text), false);
+});
+
+test('v2.5.1: CSS & Web safeguards (iOS blur/gap, board drag/a11y/promo, audio & Play/Review pause)', () => {
+    const htmlSrc = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
+    const fbSrc = fs.readFileSync(path.join(ROOT, 'src/ui/feedback.js'), 'utf8');
+    const playSrc = fs.readFileSync(path.join(ROOT, 'src/features/play.js'), 'utf8');
+
+    assert.match(htmlSrc, /name="apple-mobile-web-app-status-bar-style"\s+content="default"/);
+    assert.match(cssSrc, /--ios-top-gap/);
+    assert.match(cssSrc, /\.chess-board-wrap\s*\{[^}]*overflow:\s*visible/);
+    assert.match(cssSrc, /\.chess-board-drag-canvas\s*\{/);
+    assert.match(cssSrc, /\.board-a11y-grid\s*\{/);
+    assert.match(cssSrc, /\.promo-overlay\.is-kid\s*\{/);
+    assert.match(cssSrc, /\.promo-box\.is-kid\s*\{[^}]*outline:\s*3px solid var\(--gold-fill\)/);
+    assert.match(cssSrc, /\.duck-icon-btn\.is-toggle-off\s+\.duck-icon-btn-inner/);
+    assert.match(cssSrc, /\.puzzle-refute-row\s*\{/);
+    assert.match(cssSrc, /\.export-lightbox\s*\{/);
+    assert.match(cssSrc, /\.board-theme-grid\s*\{/);
+    assert.match(cssSrc, /\.history-card\s*\{[^}]*cursor:\s*pointer/);
+    assert.match(fbSrc, /MOVE_GAIN\s*=\s*0\.65/);
+    assert.match(playSrc, /openReview\([^)]*\)\s*\{[\s\S]*playing:\s*false/);
+});

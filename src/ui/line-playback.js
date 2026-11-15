@@ -12,7 +12,7 @@ export function moveAnim(before, m) {
         if (fileOf(m.to) === 6) slides.push({ from: m.to + 1, to: m.to - 1 });
         else slides.push({ from: m.to - 2, to: m.to + 1 });
     }
-    return { id: nextAnimId(), slides };
+    return { id: nextAnimId(), slides, capture: before.isCapture(m), promotion: m.promo !== 0 };
 }
 
 export function undoAnim(before, m) {

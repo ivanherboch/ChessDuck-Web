@@ -94,11 +94,16 @@ export const ICON_PATHS = {
         'M24,18C24.38,20.91 18.45,25.37 16,27C13,29 13.18,31.34 11,31C9.958,30.06 12.41,27.96 11,28C10,28 11.19,29.23 10,30C9,30 5.997,31 6,26C6,24 12,14 12,14C12,14 13.89,12.1 14,10.5C13.27,9.506 13.5,8.5 13.5,7.5C14.5,6.5 16.5,10 16.5,10L18.5,10C18.5,10 19.28,8.008 21,7C22,7 22,10 22,10Z',
         'M11,40.5L39,40.5L39,43L11,43Z',
     ],
+    KnightOutlined: [
+        { d: 'M22,10C32.5,11 38.5,18 38,39L15,39C15,30 25,32.5 23,18', fill: 'none', stroke: 'currentColor', strokeWidth: '2.6', strokeLineJoin: 'round' },
+        { d: 'M24,18C24.38,20.91 18.45,25.37 16,27C13,29 13.18,31.34 11,31C9.958,30.06 12.41,27.96 11,28C10,28 11.19,29.23 10,30C9,30 5.997,31 6,26C6,24 12,14 12,14C12,14 13.89,12.1 14,10.5C13.27,9.506 13.5,8.5 13.5,7.5C14.5,6.5 16.5,10 16.5,10L18.5,10C18.5,10 19.28,8.008 21,7C22,7 22,10 22,10Z', fill: 'none', stroke: 'currentColor', strokeWidth: '2.6', strokeLineJoin: 'round' },
+        'M11,40.5L39,40.5L39,43L11,43Z',
+    ],
 };
 
 export function createIcon(name, size = 20, className = '') {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    const vb = name === 'Knight' ? '0 0 45 45' : '0 0 24 24';
+    const vb = (name === 'Knight' || name === 'KnightOutlined') ? '0 0 45 45' : '0 0 24 24';
     svg.setAttribute('viewBox', vb);
     svg.setAttribute('width', String(size));
     svg.setAttribute('height', String(size));
@@ -106,10 +111,18 @@ export function createIcon(name, size = 20, className = '') {
     if (className) svg.setAttribute('class', `duck-icon ${className}`);
     else svg.setAttribute('class', 'duck-icon');
     const paths = ICON_PATHS[name] || [];
-    for (const d of paths) {
+    for (const item of paths) {
         const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        p.setAttribute('d', d);
-        p.setAttribute('fill', 'currentColor');
+        if (typeof item === 'string') {
+            p.setAttribute('d', item);
+            p.setAttribute('fill', 'currentColor');
+        } else {
+            p.setAttribute('d', item.d);
+            p.setAttribute('fill', item.fill ?? 'currentColor');
+            if (item.stroke) p.setAttribute('stroke', item.stroke);
+            if (item.strokeWidth) p.setAttribute('stroke-width', item.strokeWidth);
+            if (item.strokeLineJoin) p.setAttribute('stroke-linejoin', item.strokeLineJoin);
+        }
         svg.appendChild(p);
     }
     return svg;

@@ -1,7 +1,8 @@
 import {
-    BISHOP, BLACK, KNIGHT, Move, PIECE_NAMES_FR, PIECE_VALUES, QUEEN, ROOK,
+    BISHOP, BLACK, KNIGHT, Move, PIECE_NAMES_FR, QUEEN, ROOK,
     fileOf, isWhite, pieceType, rankOf, sq, sqName,
 } from '../core/chess.js';
+import { PieceLexiconFr } from '../core/piece-fr.js';
 import { winPercent, isMateScore, mateIn } from '../core/stockfish.js';
 import { BoardGeometry } from './board-geometry.js';
 import { feedback } from './feedback.js';
@@ -36,29 +37,12 @@ export function drawRoundRect(ctx, x, y, w, h, r) {
     ctx.quadraticCurveTo(x, y, x + radius, y);
 }
 
-/** Description TalkBack/ARIA de l'échiquier. */
-export function describeBoard(p, last, selected, flipped) {
-    let sb = `Échiquier, vue des ${flipped ? 'Noirs' : 'Blancs'}. Trait aux ${p.whiteToMove ? 'Blancs' : 'Noirs'}.`;
-    if (p.isCheckmate) sb += ' Échec et mat.';
-    else if (p.inCheck) sb += ' Échec au roi.';
-    if (last) sb += ` Dernier coup : ${sqName(last.from)} vers ${sqName(last.to)}.`;
-    if (selected != null && selected >= 0 && p.board[selected] !== 0) {
-        const uniq = new Set(p.legalFrom(selected).map((m) => m.to));
-        sb += ` Sélection : ${PIECE_NAMES_FR[pieceType(p.board[selected])]} en ${sqName(selected)}, ${uniq.size} coup${uniq.size > 1 ? 's' : ''} possible${uniq.size > 1 ? 's' : ''}.`;
-    }
-    for (const white of [true, false]) {
-        const items = [];
-        for (let i = 0; i < 64; i++) {
-            const pc = p.board[i];
-            if (pc !== 0 && isWhite(pc) === white) {
-                items.push({ t: pieceType(pc), sq: i, val: PIECE_VALUES[pieceType(pc)] });
-            }
-        }
-        items.sort((a, b) => b.val - a.val);
-        const list = items.map((it) => `${PIECE_NAMES_FR[it.t]} ${sqName(it.sq)}`).join(', ');
-        sb += ` ${white ? 'Blancs' : 'Noirs'} : ${list}.`;
-    }
-    return sb;
+/** Nom vocal d'une pièce : « Cavalier blanc », « Tour noire » ; « case vide » sinon. */
+function spokenPiece(piece) {
+    if (!piece) return 'case vide';
+    const t = pieceType(piece);
+    const f = PieceLexiconFr.isFeminine(t);
+    return PIECE_NAMES_FR[t] + (isWhite(piece) ? (f ? ' blanche' : ' blanc') : (f ? ' noire' : ' noir'));
 }
 
 export function evalShort(evalWhite) {
@@ -70,19 +54,52 @@ export function evalShort(evalWhite) {
     return `${evalWhite >= 0 ? '+' : '−'}${Math.abs(evalWhite) >= 1000 ? pawns.toFixed(0) : pawns.toFixed(1)}`;
 }
 
-/** Échiquier interactif HTML5 Canvas avec animation 180 ms, secousse, glisser-déposer et flèches. */
+/** Échiquier interactif HTML5 Canvas avec animation 180 ms, secousse, glisser-déposer, flèches et grille ARIA. */
 export class ChessBoardView {
     constructor() {
         this.el = document.createElement('div');
         this.el.className = 'chess-board-wrap';
         this.canvas = document.createElement('canvas');
         this.canvas.className = 'chess-board-canvas';
-        this.canvas.setAttribute('role', 'img');
+        this.canvas.setAttribute('aria-hidden', 'true');
+        this.dragCanvas = document.createElement('canvas');
+        this.dragCanvas.className = 'chess-board-drag-canvas hidden';
+        this.dragCanvas.setAttribute('aria-hidden', 'true');
+
+        // 64 cases accessibles superposées dans l'ordre visuel (sans intercepter les gestes du pointeur).
+        this.a11yEl = document.createElement('div');
+        this.a11yEl.className = 'board-a11y-grid';
+        this.a11yEl.setAttribute('role', 'group');
+        this._a11yCells = [];
+        for (let vis = 0; vis < 64; vis++) {
+            const cell = document.createElement('div');
+            cell.className = 'board-a11y-cell';
+            cell.addEventListener('click', () => {
+                const q = Number(cell.dataset.sq);
+                if (Number.isInteger(q) && q >= 0 && q < 64) {
+                    this._tapSquare(q);
+                }
+            });
+            cell.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    const q = Number(cell.dataset.sq);
+                    if (Number.isInteger(q) && q >= 0 && q < 64) {
+                        e.preventDefault();
+                        this._tapSquare(q);
+                    }
+                }
+            });
+            this._a11yCells.push(cell);
+            this.a11yEl.appendChild(cell);
+        }
+
         this.promoEl = document.createElement('div');
         this.promoEl.className = 'promo-overlay hidden';
-        this.el.append(this.canvas, this.promoEl);
+        this.promoEl.setAttribute('aria-label', 'Annuler la promotion');
+        this.el.append(this.canvas, this.a11yEl, this.dragCanvas, this.promoEl);
 
         this.ctx = this.canvas.getContext('2d');
+        this.dragCtx = this.dragCanvas.getContext('2d');
         this._state = {
             position: null,
             flipped: false,
@@ -125,20 +142,31 @@ export class ChessBoardView {
             : null;
         this._resizeObs?.observe(this.el);
 
+        this._cancelPromo = () => {
+            if (!this._promoPair) return;
+            this._promoPair = null;
+            this._selected = -1;
+            this._renderPromo();
+            this._syncA11y();
+            this.draw();
+        };
         this.promoEl.addEventListener('click', (e) => {
-            if (e.target === this.promoEl) {
-                this._promoPair = null;
-                this._selected = -1;
-                this._renderPromo();
-                this.draw();
-            }
+            if (e.target === this.promoEl) this._cancelPromo();
         });
+        this._onPromoKey = (e) => {
+            if (e.key === 'Escape' && this._promoPair) {
+                e.preventDefault();
+                this._cancelPromo();
+            }
+        };
+        document.addEventListener('keydown', this._onPromoKey);
     }
 
     destroy() {
         if (this._rafId) cancelAnimationFrame(this._rafId);
         this._unbindPieceLoad();
         this._resizeObs?.disconnect();
+        document.removeEventListener('keydown', this._onPromoKey);
     }
 
     setState(next) {
@@ -163,37 +191,80 @@ export class ChessBoardView {
             const sk = this._skipMove;
             const shouldSkip = sk && anim.slides.some((sl) => sl.from === sk.from && sl.to === sk.to);
             this._skipMove = null;
+            const fbOpts = {
+                capture: Boolean(anim.capture),
+                check: Boolean(this._state.position?.inCheck),
+                promotion: Boolean(anim.promotion),
+            };
             if (shouldSkip) {
                 this._animT = 1;
-                feedback.move();
+                feedback.move(fbOpts);
             } else {
                 this._animT = 0;
                 this._animStart = performance.now();
-                feedback.move();
+                feedback.move(fbOpts);
                 this._ensureLoop();
             }
         }
 
-        if (this._state.position) {
-            this.canvas.setAttribute(
-                'aria-label',
-                describeBoard(
-                    this._state.position,
-                    this._state.lastMove,
-                    this._state.interactive && this._selected >= 0 ? this._selected : null,
-                    this._state.flipped,
-                ),
-            );
-        }
         this._syncCanvasSize();
+        this._syncA11y();
         this.draw();
     }
 
-    _syncCanvasSize() {
+    _syncA11y() {
+        const pos = this._state.position;
+        if (!pos) return;
+        const { flipped, interactive, lastMove } = this._state;
+        const status = pos.isCheckmate ? ' Échec et mat.' : pos.inCheck ? ' Échec au roi.' : '';
+        this.a11yEl.setAttribute(
+            'aria-label',
+            `Échiquier, vue des ${flipped ? 'Noirs' : 'Blancs'}. Trait aux ${pos.whiteToMove ? 'Blancs' : 'Noirs'}.${status}`,
+        );
+
+        const sel = interactive ? this._selected : -1;
+        const targets = sel >= 0 ? pos.legalFrom(sel) : [];
+        const checked = pos.inCheck ? pos.kingSquare(pos.whiteToMove) : -1;
+
+        for (let vis = 0; vis < 64; vis++) {
+            const r = Math.floor(vis / 8);
+            const c = vis % 8;
+            const q = flipped ? sq(7 - c, r) : sq(c, 7 - r);
+            const cell = this._a11yCells[vis];
+            cell.dataset.sq = String(q);
+            const label = `${sqName(q)}, ${spokenPiece(pos.board[q])}`;
+            const states = [];
+            if (q === sel) states.push('sélectionnée');
+            const targetMove = targets.find((m) => m.to === q);
+            if (targetMove) states.push(pos.isCapture(targetMove) ? 'prise possible' : 'destination légale');
+            if (lastMove && (q === lastMove.from || q === lastMove.to)) states.push('dernier coup');
+            if (q === checked) states.push('roi en échec');
+
+            cell.setAttribute('aria-label', states.length ? `${label}, ${states.join(', ')}` : label);
+            if (states.length) cell.setAttribute('aria-description', states.join(', '));
+            else cell.removeAttribute('aria-description');
+
+            if (interactive) {
+                cell.setAttribute('role', 'button');
+                cell.tabIndex = 0;
+                cell.setAttribute('aria-pressed', String(q === sel));
+            } else {
+                cell.removeAttribute('role');
+                cell.removeAttribute('tabindex');
+                cell.removeAttribute('aria-pressed');
+            }
+        }
+    }
+
+    _cssBoardSide() {
         const rect = this.el.getBoundingClientRect();
-        const cssSide = rect.height > 0
+        return rect.height > 0
             ? Math.max(0, Math.round(Math.min(rect.width, rect.height)))
             : Math.max(0, Math.round(rect.width));
+    }
+
+    _syncCanvasSize() {
+        const cssSide = this._cssBoardSide();
         if (!cssSide) return;
         const dpr = Math.min(window.devicePixelRatio || 1, 3);
         const px = Math.round(cssSide * dpr);
@@ -202,6 +273,7 @@ export class ChessBoardView {
             this.canvas.height = px;
             this.draw();
         }
+        if (this._promoPair) this._renderPromo();
     }
 
     _ensureLoop() {
@@ -245,6 +317,7 @@ export class ChessBoardView {
         this._shakeVal = 0;
         feedback.error();
         this._state.onIllegalTouch?.(q);
+        this._syncA11y();
         this._ensureLoop();
     }
 
@@ -259,9 +332,38 @@ export class ChessBoardView {
         } else {
             if (viaDrag) this._skipMove = cands[0];
             this._selected = -1;
+            this._syncA11y();
             this._state.onMove?.(cands[0]);
         }
         return true;
+    }
+
+    _tapSquare(q) {
+        const pos = this._state.position;
+        if (!pos || !this._state.interactive || this._promoPair) return false;
+        if (this._selected >= 0 && this._selected !== q && this._tryMove(this._selected, q, false)) {
+            return true;
+        }
+        const piece = pos.board[q];
+        const own = piece !== 0 && isWhite(piece) === pos.whiteToMove;
+        if (own) {
+            if (pos.legalFrom(q).length === 0) {
+                this._selected = -1;
+                this._refuse(q);
+            } else {
+                this._selected = this._selected === q ? -1 : q;
+                this._syncA11y();
+                this.draw();
+            }
+            return true;
+        }
+        if (this._selected >= 0) {
+            this._selected = -1;
+            this._syncA11y();
+            this.draw();
+            return true;
+        }
+        return false;
     }
 
     _renderPromo() {
@@ -269,19 +371,35 @@ export class ChessBoardView {
         const pos = this._state.position;
         if (!pair || !pos) {
             this.promoEl.classList.add('hidden');
+            this.promoEl.classList.remove('is-kid');
             this.promoEl.replaceChildren();
             return;
         }
         const white = pos.whiteToMove;
+        const { flipped, kid } = this._state;
+        const side = this._cssBoardSide() || this.el.clientWidth || 320;
+        const cell = Math.max(side / 8, 48);
+        const col = BoardGeometry.column(pair.to, flipped);
+        const atTop = BoardGeometry.row(pair.to, flipped) === 0;
+        const x = Math.min((side / 8) * col, Math.max(0, side - cell));
+        const y = atTop ? 0 : Math.max(0, side - cell * 4);
+        const types = atTop ? [QUEEN, ROOK, BISHOP, KNIGHT] : [KNIGHT, BISHOP, ROOK, QUEEN];
+
+        this.promoEl.classList.toggle('is-kid', Boolean(kid));
         const box = document.createElement('div');
-        box.className = 'promo-box';
-        for (const type of [QUEEN, ROOK, BISHOP, KNIGHT]) {
+        box.className = `promo-box${kid ? ' is-kid' : ''}`;
+        box.style.width = `${cell}px`;
+        box.style.left = `${x}px`;
+        box.style.top = `${y}px`;
+        for (const type of types) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'promo-btn';
+            btn.style.width = `${cell}px`;
+            btn.style.height = `${cell}px`;
             btn.setAttribute('aria-label', `Promouvoir en ${PIECE_NAMES_FR[type]}`);
             const img = document.createElement('img');
-            img.src = pieceStore.urlFor(white ? type : type + BLACK, this._state.kid);
+            img.src = pieceStore.urlFor(white ? type : type + BLACK, kid);
             img.alt = PIECE_NAMES_FR[type];
             btn.appendChild(img);
             btn.addEventListener('click', (e) => {
@@ -289,6 +407,7 @@ export class ChessBoardView {
                 this._promoPair = null;
                 this._selected = -1;
                 this._renderPromo();
+                this._syncA11y();
                 this._state.onMove?.(new Move(pair.from, pair.to, type));
             });
             box.appendChild(btn);
@@ -327,6 +446,7 @@ export class ChessBoardView {
                 ptr.dragging = true;
                 this._selected = ptr.sqDown;
                 this._dragFrom = ptr.sqDown;
+                this._syncA11y();
             }
             if (ptr.dragging) {
                 this._dragPos = { x, y };
@@ -343,6 +463,7 @@ export class ChessBoardView {
             if (!pos || !this._state.interactive) {
                 this._dragFrom = -1;
                 this._selected = -1;
+                this._syncA11y();
                 this.draw();
                 return;
             }
@@ -366,23 +487,16 @@ export class ChessBoardView {
                 const target = BoardGeometry.squareAtXY(x, y, s, this._state.flipped);
                 this._dragFrom = -1;
                 if (inside && target !== ptr.sqDown) {
-                    if (!this._tryMove(ptr.sqDown, target, true)) this.draw();
+                    if (!this._tryMove(ptr.sqDown, target, true)) {
+                        this._syncA11y();
+                        this.draw();
+                    }
                 } else {
-                    this.draw();
-                }
-            } else if (this._selected >= 0 && this._selected !== ptr.sqDown && this._tryMove(this._selected, ptr.sqDown, false)) {
-                // coup joué par toucher-relâcher
-            } else if (ptr.own) {
-                if (pos.legalFrom(ptr.sqDown).length === 0) {
-                    this._selected = -1;
-                    this._refuse(ptr.sqDown);
-                } else {
-                    this._selected = this._selected === ptr.sqDown ? -1 : ptr.sqDown;
+                    this._syncA11y();
                     this.draw();
                 }
             } else {
-                this._selected = -1;
-                this.draw();
+                this._tapSquare(ptr.sqDown);
             }
         };
 
@@ -400,8 +514,12 @@ export class ChessBoardView {
         const cssSide = this.canvas.width / Math.max(1, dpr);
         if (cssSide <= 0) return;
 
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         ctx.save();
         ctx.scale(dpr, dpr);
+        ctx.beginPath();
+        drawRoundRect(ctx, 0, 0, cssSide, cssSide, this._state.kid ? 17 : 4);
+        ctx.clip();
 
         const s = cssSide / 8;
         const { flipped, interactive, lastMove, anim, arrows, marks, badges, kid, showCoords, palette: c } = this._state;
@@ -423,7 +541,7 @@ export class ChessBoardView {
 
         // 2. Dernier coup
         if (lastMove) {
-            ctx.fillStyle = 'rgba(247, 236, 94, 0.40)';
+            ctx.fillStyle = c.lastMoveTint || 'rgba(247, 236, 94, 0.40)';
             for (const q of [lastMove.from, lastMove.to]) {
                 const [x, y] = topLeft(q);
                 ctx.fillRect(x, y, s, s);
@@ -443,9 +561,10 @@ export class ChessBoardView {
             if (k >= 0) {
                 const [cx, cy] = center(k);
                 const [kx, ky] = topLeft(k);
+                const glow = c.checkGlow || '#EF4444';
                 const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, s * 0.62);
-                grad.addColorStop(0, 'rgba(239, 68, 68, 0.90)');
-                grad.addColorStop(1, 'rgba(239, 68, 68, 0.00)');
+                grad.addColorStop(0, glow.startsWith('#') ? hexToRgba(glow, 0.90) : glow);
+                grad.addColorStop(1, glow.startsWith('#') ? hexToRgba(glow, 0.00) : 'rgba(239, 68, 68, 0.00)');
                 ctx.fillStyle = grad;
                 ctx.fillRect(kx, ky, s, s);
             }
@@ -473,11 +592,11 @@ export class ChessBoardView {
         }
 
         // 6. Pièces immobiles
-        const drawPiece = (piece, x, y, scale = 1) => {
+        const drawPiece = (targetCtx, piece, x, y, scale = 1) => {
             const img = pieceStore.getPieceImage(piece, kid);
             if (!img) return;
             const d = s * scale;
-            ctx.drawImage(img, x - (d - s) / 2, y - (d - s) / 2, d, d);
+            targetCtx.drawImage(img, x - (d - s) / 2, y - (d - s) / 2, d, d);
         };
 
         const sliding = anim && this._animT < 1 ? anim.slides : [];
@@ -486,10 +605,10 @@ export class ChessBoardView {
             if (piece === 0 || q === this._dragFrom || sliding.some((sl) => sl.to === q)) continue;
             let [x, y] = topLeft(q);
             if (q === this._shakeSq) x += this._shakeVal * s * 0.09;
-            drawPiece(piece, x, y, 1);
+            drawPiece(ctx, piece, x, y, 1);
         }
 
-        // 7. Coordonnées par-dessus les pièces
+        // 7. Coordonnées par-dessus les pièces (lettres en bas à droite, chiffres en haut à gauche)
         if (showCoords) {
             const fs = Math.max(9, s * 0.19);
             ctx.font = `700 ${fs}px ${fontFam}`;
@@ -546,7 +665,7 @@ export class ChessBoardView {
             if (!piece) continue;
             const [fx, fy] = topLeft(sl.from);
             const [tx, ty] = topLeft(sl.to);
-            drawPiece(piece, fx + (tx - fx) * this._animT, fy + (ty - fy) * this._animT, 1);
+            drawPiece(ctx, piece, fx + (tx - fx) * this._animT, fy + (ty - fy) * this._animT, 1);
         }
 
         // 10. Flèches
@@ -605,19 +724,39 @@ export class ChessBoardView {
             ctx.textBaseline = 'top';
         }
 
-        // 12. Pièce en cours de glissement (surélevée au-dessus du doigt, x1.3)
-        if (this._dragFrom >= 0) {
-            const piece = pos.board[this._dragFrom];
-            const ax = this._dragPos.x - s / 2;
-            const ay = this._dragPos.y - s * 1.35;
-            ctx.fillStyle = 'rgba(0,0,0,0.25)';
-            ctx.beginPath();
-            ctx.ellipse(ax + s * 0.5, ay + s * 1.12, s * 0.38, s * 0.10, 0, 0, Math.PI * 2);
-            ctx.fill();
-            drawPiece(piece, ax, ay, 1.3);
-        }
-
         ctx.restore();
+
+        // 12. Pièce en cours de glissement (non rognée aux bords, notamment en 8e rangée)
+        if (this._dragFrom >= 0 && this.dragCtx) {
+            const pad = Math.ceil(s * 1.6);
+            const fullCss = cssSide + pad * 2;
+            const fullPx = Math.round(fullCss * dpr);
+            if (this.dragCanvas.width !== fullPx || this.dragCanvas.height !== fullPx) {
+                this.dragCanvas.width = fullPx;
+                this.dragCanvas.height = fullPx;
+            }
+            this.dragCanvas.style.left = `${-pad}px`;
+            this.dragCanvas.style.top = `${-pad}px`;
+            this.dragCanvas.style.width = `${fullCss}px`;
+            this.dragCanvas.style.height = `${fullCss}px`;
+            this.dragCanvas.classList.remove('hidden');
+
+            const dctx = this.dragCtx;
+            dctx.clearRect(0, 0, fullPx, fullPx);
+            dctx.save();
+            dctx.scale(dpr, dpr);
+            const piece = pos.board[this._dragFrom];
+            const ax = this._dragPos.x - s / 2 + pad;
+            const ay = this._dragPos.y - s * 1.35 + pad;
+            dctx.fillStyle = 'rgba(0,0,0,0.25)';
+            dctx.beginPath();
+            dctx.ellipse(ax + s * 0.5, ay + s * 1.12, s * 0.38, s * 0.10, 0, 0, Math.PI * 2);
+            dctx.fill();
+            drawPiece(dctx, piece, ax, ay, 1.3);
+            dctx.restore();
+        } else {
+            this.dragCanvas.classList.add('hidden');
+        }
     }
 }
 

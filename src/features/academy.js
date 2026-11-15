@@ -5,12 +5,13 @@ import { prefs } from '../data/prefs.js';
 import { ChessBoardView } from '../ui/board.js';
 import {
     FeedbackCardView, ModuleLayoutView, MoveStripView, Tone,
-    duckButton, duckIconButton, duckSegmentedRow, el, infoPill, loadingState, stepTitle, updateSegmentedRow,
+    duckButton, duckIconButton, duckSegmentedRow, el, hintButton, infoPill, loadingState, stepTitle, turnOf, updateSegmentedRow,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 import { LinePlaybackController, moveAnim } from '../ui/line-playback.js';
 import { narrator } from '../ui/narrator.js';
+import { GameLogic } from './game-logic.js';
 import { openLessonCatalog } from './lesson-catalog.js';
 
 export const POST_SPEECH_PAUSE_MS = 850;
@@ -44,12 +45,15 @@ export class AcademyFeature {
         this.state = {
             lessonId: prefs.current.lessonId || 1,
             filter: null,
+            catalogStatus: 0,
             challenge: false,
             cursor: 0,
             playing: false,
             flipped: false,
             anim: null,
             hintStage: 0,
+            stuck: null,
+            voiceTip: null,
             message: '',
             tone: Tone.INFO,
             done: false,
@@ -84,8 +88,12 @@ export class AcademyFeature {
             if (st.narration !== this._lastNarration) {
                 this._lastNarration = st.narration;
                 this._spokenHere = false;
-                if (st.narration) narrator.prepare();
-                else narrator.stop();
+                if (st.narration) {
+                    this.state.voiceTip = null;
+                    narrator.prepare();
+                } else {
+                    narrator.stop();
+                }
                 if (Lessons.all.length && !this.state.challenge) this._render();
             }
         });
@@ -199,7 +207,7 @@ export class AcademyFeature {
         // Row 2: Segmented Guidé/Défi + flip
         this.modeRow = el('div', 'academy-mode-row');
         this.modeSeg = duckSegmentedRow({
-            options: ['Guidé (démo)', 'Défi (pratique)'],
+            options: ['Guidé', 'Défi'],
             selectedIndex: this.state.challenge ? 1 : 0,
             icons: ['Visibility', 'SportsScore'],
             onSelect: (i) => this.setChallenge(i === 1),
@@ -219,8 +227,10 @@ export class AcademyFeature {
         this._catalog = openLessonCatalog({
             currentLessonId: this.state.lessonId,
             currentFilter: this.state.filter,
+            currentStatus: this.state.catalogStatus,
             masteredSet: this.mastered,
             onSelectFilter: (cat) => this.setFilter(cat),
+            onSelectStatus: (st) => { this.state.catalogStatus = st; },
             onOpenLesson: (id) => this.open(id),
             onClose: () => { this._catalog = null; },
         });
@@ -237,6 +247,8 @@ export class AcademyFeature {
         this.state.flipped = !l.heroWhite;
         this.state.anim = null;
         this.state.hintStage = 0;
+        this.state.stuck = null;
+        this.state.voiceTip = null;
         this.state.done = false;
         this._spokenHere = false;
         if (this.state.filter !== null && this.state.filter !== l.category) {
@@ -276,6 +288,8 @@ export class AcademyFeature {
         this.state.playing = false;
         this.state.anim = null;
         this.state.hintStage = 0;
+        this.state.stuck = null;
+        this.state.voiceTip = null;
         this.state.done = false;
         this.state.message = '';
         this.state.tone = Tone.INFO;
@@ -297,6 +311,8 @@ export class AcademyFeature {
         if (t === this.state.cursor) return;
         this.state.anim = LinePlaybackController.transition(l.line, this.state.cursor, t);
         this.state.cursor = t;
+        this.state.stuck = null;
+        this.state.voiceTip = null;
         this._spokenHere = false;
         this.narrate();
         this._render();
@@ -337,6 +353,7 @@ export class AcademyFeature {
         if (!l) return;
         this.playback.cancel();
         this.state.playing = true;
+        this.state.voiceTip = null;
         if (this.state.cursor >= l.line.size && this.state.cursor > 0) this.goTo(0);
         else {
             const resumed = narrator.resume();
@@ -374,6 +391,7 @@ export class AcademyFeature {
         this.state.cursor = 0;
         this.state.anim = null;
         this.state.hintStage = 0;
+        this.state.stuck = null;
         this.state.done = false;
         this.state.tone = Tone.INFO;
         this.state.flipped = !l.heroWhite;
@@ -403,12 +421,14 @@ export class AcademyFeature {
                 this.state.anim = moveAnim(l.line.positions[cur], l.line.moves[cur]);
                 this.state.cursor = cur + 1;
                 this.state.hintStage = 0;
+                this.state.stuck = null;
                 this._render();
             }
             if (!this._destroyed && !isCancelled() && this.state.cursor >= l.line.size) {
                 await db.markLesson(l.id);
                 if (this._destroyed || isCancelled()) return;
                 this.state.done = true;
+                this.state.stuck = null;
                 this.state.tone = Tone.GOOD;
                 this.state.message = `Leçon maîtrisée ! Vous avez joué tous les coups clés de « ${l.title} ».`;
                 this._render();
@@ -420,6 +440,7 @@ export class AcademyFeature {
         const s = this.state;
         const l = this.lesson;
         if (!l || !s.challenge || s.done || !this._heroToMove(s.cursor)) return false;
+        s.stuck = null;
         const expected = l.line.moves[s.cursor];
         if (m.equals(expected)) {
             s.anim = moveAnim(l.line.positions[s.cursor], m);
@@ -443,6 +464,7 @@ export class AcademyFeature {
         if (!s.challenge || s.done || !this._heroToMove(s.cursor)) return;
         const stage = Math.min(2, s.hintStage + 1);
         s.hintStage = stage;
+        s.stuck = null;
         s.tone = Tone.GOLD;
         s.message = stage === 1
             ? 'Indice 1/2 : la pièce à jouer est surlignée en vert.'
@@ -460,6 +482,27 @@ export class AcademyFeature {
         const idx = Math.max(0, pool.findIndex((it) => it.id === this.state.lessonId));
         const target = pool[(idx + delta + pool.length) % pool.length];
         if (target) this.open(target.id);
+    }
+
+    _challengeTitle() {
+        const l = this.lesson;
+        const s = this.state;
+        if (!l) return '';
+        const line = l.line;
+        const cur = Math.max(0, Math.min(line.size, s.cursor));
+        const side = l.heroWhite ? 'Blancs' : 'Noirs';
+        if (s.done) return 'Défi réussi';
+        const lastIdx = Math.max(0, line.size - 1);
+        const turn = line.size ? turnOf(line, Math.min(cur, lastIdx), 1) : 1;
+        const maxTurn = line.size ? turnOf(line, lastIdx, 1) : 1;
+        return `Défi : jouez les ${side} · coup ${turn} sur ${maxTurn}`;
+    }
+
+    _onIllegalTouch(pos, sq) {
+        if (!this.state.challenge) return;
+        this.state.stuck = GameLogic.whyStuck(pos, sq);
+        this.feedbackCard.update({ text: this.state.stuck, tone: Tone.GOLD, title: this._challengeTitle() });
+        this.layout.relayout();
     }
 
     _renderBoard() {
@@ -491,6 +534,7 @@ export class AcademyFeature {
             kid: false,
             showCoords: this._showCoords,
             palette: this._palette,
+            onIllegalTouch: heroTurn ? (sq) => this._onIllegalTouch(pos, sq) : null,
             onMove: (m) => {
                 if (this.challengeMove(m)) feedback.success();
                 else feedback.error();
@@ -522,16 +566,19 @@ export class AcademyFeature {
         // Mode segmented bar
         updateSegmentedRow(this.modeSeg, s.challenge ? 1 : 0);
 
-        // Move strip
-        this.moveStrip.update({
-            line,
-            cursor: cur,
-            onSelect: !s.challenge ? (n) => this.jump(n) : null,
-            onPrev: !s.challenge ? () => this.step(-1) : null,
-            onNext: !s.challenge ? () => this.step(1) : null,
-            emptyText: "Les coups de la leçon s'afficheront ici.",
-            firstTurn: 1,
-        });
+        // Move strip (masquée en Défi, où elle ne sert pas)
+        this.moveStrip.el.classList.toggle('hidden', s.challenge);
+        if (!s.challenge) {
+            this.moveStrip.update({
+                line,
+                cursor: cur,
+                onSelect: (n) => this.jump(n),
+                onPrev: () => this.step(-1),
+                onNext: () => this.step(1),
+                emptyText: "Les coups de la leçon s'afficheront ici.",
+                firstTurn: 1,
+            });
+        }
 
         // Feedback + action buttons
         if (!s.challenge) {
@@ -541,15 +588,47 @@ export class AcademyFeature {
             const text = cur === 0
                 ? `${l.summary} Touchez Lecture pour dérouler la leçon coup par coup.`
                 : l.texts[cur - 1];
-            this.feedbackCard.update({ text, tone: Tone.INFO, title });
+            this.feedbackCard.update({
+                text: s.voiceTip || text,
+                tone: s.voiceTip ? Tone.GOLD : Tone.INFO,
+                title,
+            });
 
-            const bPrev = duckButton({
-                label: 'Début',
+            const narration = prefs.current.narration;
+            const speaking = narrator.speaking;
+            const bSpeech = duckIconButton({
+                icon: speaking ? 'VolumeOff' : 'VolumeUp',
+                ariaLabel: !narration
+                    ? "Lecture vocale : comment l'activer"
+                    : (speaking ? 'Arrêter la lecture à voix haute' : 'Réécouter le commentaire'),
+                onClick: () => {
+                    if (prefs.current.narration) {
+                        if (this._voiceAvailable === false) {
+                            narrator.prepare();
+                            s.voiceTip = "Aucune voix française n'est disponible sur ce navigateur. Vérifiez les réglages de synthèse vocale de votre appareil.";
+                            this._render();
+                        } else {
+                            if (s.voiceTip) s.voiceTip = null;
+                            this.toggleSpeech();
+                        }
+                    } else if (this._voiceAvailable === false) {
+                        narrator.prepare();
+                        s.voiceTip = "Aucune voix française n'est disponible sur ce navigateur. Vérifiez les réglages de synthèse vocale de votre appareil.";
+                        this._render();
+                    } else {
+                        narrator.prepare();
+                        s.voiceTip = 'La lecture vocale est désactivée : activez-la dans Paramètres, section Audio, voix et retours.';
+                        this._render();
+                    }
+                },
+            });
+            // Quatre boutons : Début et Fin en icônes pour que rien ne se coupe sur 360 px.
+            const bPrev = duckIconButton({
                 icon: 'SkipPrevious',
+                ariaLabel: 'Revenir au début',
                 enabled: cur > 0,
                 onClick: () => this.rewind(),
             });
-            bPrev.style.flex = '1';
             const bPlay = duckButton({
                 label: s.playing ? 'Pause' : 'Lecture',
                 icon: s.playing ? 'Pause' : 'PlayArrow',
@@ -557,29 +636,20 @@ export class AcademyFeature {
                 filled: true,
                 onClick: () => this.togglePlay(),
             });
-            bPlay.style.flex = '1.5';
-            const bNext = duckButton({
-                label: 'Fin',
+            bPlay.style.flex = '1';
+            const bNext = duckIconButton({
                 icon: 'SkipNext',
+                ariaLabel: 'Aller à la fin',
                 enabled: cur < line.size,
                 onClick: () => this.last(),
             });
-            bNext.style.flex = '1';
-            const buttons = [bPrev, bPlay, bNext];
-            if (prefs.current.narration && this._voiceAvailable !== false) {
-                const speaking = narrator.speaking;
-                const bSpeech = duckIconButton({
-                    icon: speaking ? 'VolumeOff' : 'VolumeUp',
-                    ariaLabel: speaking ? 'Arrêter la lecture à voix haute' : 'Réécouter le commentaire',
-                    onClick: () => this.toggleSpeech(),
-                });
-                buttons.unshift(bSpeech);
-            }
-            this.actionRow.replaceChildren(...buttons);
+            this.actionRow.replaceChildren(bSpeech, bPrev, bPlay, bNext);
         } else {
-            const side = l.heroWhite ? 'Blancs' : 'Noirs';
-            const title = s.done ? 'Défi réussi' : `Défi : jouez les ${side} · coup ${cur} / ${line.size}`;
-            this.feedbackCard.update({ text: s.message, tone: s.tone, title });
+            this.feedbackCard.update({
+                text: s.stuck || s.message,
+                tone: s.stuck ? Tone.GOLD : s.tone,
+                title: this._challengeTitle(),
+            });
 
             const bReset = duckButton({
                 label: 'Recommencer',
@@ -595,10 +665,8 @@ export class AcademyFeature {
                     filled: true,
                     onClick: () => this.nextLesson(),
                 })
-                : duckButton({
-                    label: `Indice ${Math.min(2, s.hintStage + 1)}/2`,
-                    icon: 'Lightbulb',
-                    accent: 'green',
+                : hintButton({
+                    stage: s.hintStage,
                     onClick: () => this.hint(),
                 });
             bRight.style.flex = '1.4';

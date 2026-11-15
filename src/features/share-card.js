@@ -5,7 +5,7 @@ import { PieceLexiconFr } from '../core/piece-fr.js';
 import { PuzzleThemes } from '../core/puzzle-themes.js';
 import { BoardGeometry } from '../ui/board-geometry.js';
 import { pieceStore } from '../ui/pieces.js';
-import { DuckPalette, hexToRgba } from '../ui/theme.js';
+import { BoardTheme, DuckPalette, hexToRgba } from '../ui/theme.js';
 
 function drawRoundRect(ctx, x, y, w, h, r) {
     if (typeof ctx.roundRect === 'function') {
@@ -35,6 +35,7 @@ export function shareStyleFromSettings(settings) {
         format: fmt,
         light: Boolean(settings?.shareLight),
         palette: DuckPalette.of(settings?.palette ?? 0),
+        board: BoardTheme.of(settings?.boardTheme ?? 0),
     };
 }
 
@@ -46,7 +47,8 @@ const FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-ser
 function buildPal(style) {
     const light = Boolean(style?.light);
     const palEntry = style?.palette || DuckPalette.SLATE_GOLD;
-    const c = palEntry.colors(!light);
+    const boardEntry = style?.board || BoardTheme.WOOD;
+    const c = boardEntry.applyTo(palEntry.colors(!light));
     return {
         light,
         bgTop: light ? c.surface : c.surfaceHi,
@@ -260,8 +262,8 @@ class Painter {
             ctx.fillRect(cx - s, cy - s, 2 * s, 2 * s);
         }
 
-        if (s >= 70) {
-            ctx.font = `700 ${s * 0.2}px ${FONT}`;
+        if (s >= 40) {
+            ctx.font = `700 ${s >= 70 ? s * 0.2 : s * 0.25}px ${FONT}`;
             ctx.textBaseline = 'alphabetic';
             for (let i = 0; i < 8; i++) {
                 const fq = flipped ? (7 - i) + 7 * 8 : i;
@@ -459,7 +461,7 @@ export const ShareCard = {
         const tipH = !tip.length ? 0 : 28 + tip.length * tipLineH;
         const top = headerHeight(title.length, titleSize) + 6;
         const bottom = (!tip.length ? 0 : tipH + 16) + FOOTER_H + 4;
-        const side = Math.min(W - 40, h - top - 16 - bottom);
+        const side = Math.min(W - 2 * M, h - top - 16 - bottom);
 
         g.background(h);
         drawHeader(g, eyebrow, pal.goldText, puzzle, title, titleSize, playerWhite);
@@ -606,15 +608,22 @@ export const ShareCard = {
                 g.badge(String(k + 1), bx + br, ty0 - titleSz * 0.34, br, pal.greenFill, pal.onGreen);
                 const sanX = bx + 2 * br + 10;
                 g.text(st.san, sanX, ty0, titleSz, pal.text, { bold: true });
-                if (!detailed && st.replySan) {
-                    g.text(`— ${st.replySan}`, sanX + g.width(st.san, titleSz, true) + 12, ty0, titleSz * 0.85, pal.redText, { bold: true });
-                }
-
                 const victim = st.before.isEnPassant(st.move)
                     ? PAWN + (isWhite(st.before.board[st.move.from]) ? 8 : 0)
                     : st.before.board[st.move.to];
+                const ps = titleSz * 1.05;
+                if (!detailed && st.replySan) {
+                    const rx = sanX + g.width(st.san, titleSz, true) + 12;
+                    const room = bx + textW - (victim !== 0 ? ps + 8 : 0) - rx;
+                    const reply = `— ${st.replySan}`;
+                    const full = titleSz * 0.85;
+                    const rw = g.width(reply, full, true);
+                    const size = rw > 0 ? Math.min(full, (full * room) / rw) : full;
+                    if (size >= titleSz * 0.5) {
+                        g.text(reply, rx, ty0, size, pal.redText, { bold: true });
+                    }
+                }
                 if (victim !== 0) {
-                    const ps = titleSz * 1.05;
                     const px = bx + textW - ps;
                     const py = ty0 - ps * 0.8;
                     g.ctx.fillStyle = pal.lightSq;

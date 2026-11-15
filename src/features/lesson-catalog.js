@@ -1,13 +1,22 @@
 import { CATEGORY_LABELS, Lessons } from '../core/lessons.js';
 import { normalizeForSearch } from '../core/text.js';
-import { createSheet, duckChip, duckIconButton, el, emptyState } from '../ui/common.js';
+import { createSheet, duckChip, duckIconButton, el, emptyState, infoPill } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 
 /** Catalogue des leçons : recherche, statut (toutes / à maîtriser / maîtrisées) et catégorie. */
-export function openLessonCatalog({ currentLessonId, currentFilter, masteredSet, onSelectFilter, onOpenLesson, onClose }) {
+export function openLessonCatalog({
+    currentLessonId,
+    currentFilter,
+    currentStatus = 0,
+    masteredSet,
+    onSelectFilter,
+    onSelectStatus,
+    onOpenLesson,
+    onClose,
+}) {
     let query = '';
-    let status = 0; // 0 = Toutes, 1 = À maîtriser, 2 = Maîtrisées
+    let status = currentStatus; // 0 = Toutes, 1 = À maîtriser, 2 = Maîtrisées
     let cat = currentFilter;
     let mastered = masteredSet;
 
@@ -62,7 +71,7 @@ export function openLessonCatalog({ currentLessonId, currentFilter, masteredSet,
                 label,
                 selected: status === i,
                 accent: 'blue',
-                onClick: () => { status = i; renderFilters(); renderList(); },
+                onClick: () => { status = i; onSelectStatus?.(i); renderFilters(); renderList(); },
             }));
         });
 
@@ -105,6 +114,7 @@ export function openLessonCatalog({ currentLessonId, currentFilter, masteredSet,
                     input.value = '';
                     clearBtn.classList.add('hidden');
                     status = 0;
+                    onSelectStatus?.(0);
                     cat = null;
                     onSelectFilter(null);
                     renderFilters();
@@ -129,6 +139,9 @@ export function openLessonCatalog({ currentLessonId, currentFilter, masteredSet,
                 lead.appendChild(el('span', 'lesson-row-num', String(item.id)));
             }
             const mid = el('div', 'lesson-row-mid');
+            if (current) {
+                mid.appendChild(infoPill({ text: 'En cours', accent: 'blue', className: 'lesson-current-pill' }));
+            }
             mid.append(el('div', 'lesson-row-title', item.title), el('div', 'lesson-row-summary', item.summary));
             const arrow = createIcon('KeyboardArrowRight', 22, 'lesson-row-arrow');
             row.append(lead, mid, arrow);

@@ -1,8 +1,8 @@
-import { prefs } from '../data/prefs.js';
-import { createSheet, duckButton, duckSegmentedRow, el, updateSegmentedRow } from '../ui/common.js';
+import { DEFAULT_ELO, prefs } from '../data/prefs.js';
+import { createSheet, duckButton, duckSegmentedRow, el, openConfirmDialog, updateSegmentedRow } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { narrator } from '../ui/narrator.js';
-import { DuckPalette, isDarkTheme } from '../ui/theme.js';
+import { BoardTheme, DuckPalette, isDarkTheme } from '../ui/theme.js';
 
 function createSwitchRow({ title, description, checked, onChange }) {
     const row = document.createElement('button');
@@ -155,12 +155,7 @@ function createPaletteOption(palette, onClick) {
         card.appendChild(dot);
     }
 
-    const sqPair = el('div', 'palette-preview-squares');
-    const sqL = el('span', 'palette-preview-sq');
-    const sqD = el('span', 'palette-preview-sq');
-    sqPair.append(sqL, sqD);
-
-    bottomRow.append(card, sqPair);
+    bottomRow.append(card);
     preview.append(topBar, bottomRow);
 
     const copy = el('div', 'palette-option-copy');
@@ -184,17 +179,69 @@ function createPaletteOption(palette, onClick) {
         el: btn,
         update(dark, selected) {
             const p = palette.colors(dark);
+            const base = DuckPalette.SLATE_GOLD.colors(dark);
+            const own = [p.greenRole.fill, p.blueRole.fill, p.redRole.fill];
+            const baseOwn = [base.greenRole.fill, base.blueRole.fill, base.redRole.fill];
+            const diff = own.some((col, idx) => col !== baseOwn[idx]);
+            const roleCols = (palette === DuckPalette.SLATE_GOLD || diff)
+                ? own
+                : [p.goldRole.text, p.surfaceHi, p.outlineStrong];
+
             btn.classList.toggle('is-selected', Boolean(selected));
             btn.setAttribute('aria-checked', String(Boolean(selected)));
             preview.style.background = p.bg;
             preview.style.borderColor = p.outlineStrong;
             topBar.style.background = p.goldRole.fill;
             card.style.background = p.surface;
-            const roleCols = [p.greenRole.fill, p.blueRole.fill, p.redRole.fill];
-            dots.forEach((dot, idx) => { dot.style.background = roleCols[idx]; });
-            sqL.style.background = p.squareLight;
-            sqD.style.background = p.squareDark;
+            dots.forEach((dot, idx) => {
+                dot.style.background = roleCols[idx];
+                dot.style.borderColor = p.outline;
+            });
             radio.classList.toggle('is-checked', Boolean(selected));
+        },
+    };
+}
+
+function createBoardThemePicker(onSelect) {
+    const grid = el('div', 'board-theme-grid');
+    grid.setAttribute('role', 'radiogroup');
+    grid.setAttribute('aria-label', "Couleurs de l'échiquier");
+    const cards = BoardTheme.entries.map((theme) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'board-theme-card';
+        btn.setAttribute('role', 'radio');
+        btn.setAttribute('aria-checked', 'false');
+        btn.setAttribute('aria-label', theme.label);
+
+        const swatch = el('div', 'board-theme-swatch');
+        swatch.setAttribute('aria-hidden', 'true');
+        for (let r = 0; r < 2; r++) {
+            for (let f = 0; f < 2; f++) {
+                const sq = el('span', (r + f) % 2 === 0 ? 'board-theme-sq-light' : 'board-theme-sq-dark');
+                sq.style.setProperty('--sq-light', theme.light);
+                sq.style.setProperty('--sq-dark', theme.dark);
+                swatch.appendChild(sq);
+            }
+        }
+        const labelEl = el('span', 'board-theme-label', theme.label);
+        btn.append(swatch, labelEl);
+        btn.addEventListener('click', () => {
+            feedback.key();
+            onSelect(theme.ordinal);
+        });
+        grid.appendChild(btn);
+        return { ordinal: theme.ordinal, el: btn };
+    });
+
+    return {
+        el: grid,
+        sync(currentOrd) {
+            for (const c of cards) {
+                const selected = c.ordinal === currentOrd;
+                c.el.classList.toggle('is-selected', selected);
+                c.el.setAttribute('aria-checked', String(selected));
+            }
         },
     };
 }
@@ -252,8 +299,8 @@ export function openSettingsSheet() {
     });
     b.append(kidBtn, kidDesc, kidNarrationRow.el);
 
-    // ---- Apparence ----
-    b.appendChild(el('h3', 'sheet-section-title', 'Apparence'));
+    // ---- Mode d'affichage ----
+    b.appendChild(el('h3', 'sheet-section-title', "Mode d'affichage"));
     const themeWrap = el('div', '');
     const themeSeg = duckSegmentedRow({
         options: ['Système', 'Jour', 'Nuit'],
@@ -263,8 +310,8 @@ export function openSettingsSheet() {
     themeWrap.appendChild(themeSeg);
     b.appendChild(themeWrap);
 
-    // ---- Échiquier et parties ----
-    b.appendChild(el('h3', 'sheet-section-title', 'Échiquier et parties'));
+    // ---- Aides pendant le jeu ----
+    b.appendChild(el('h3', 'sheet-section-title', 'Aides pendant le jeu'));
     const coordsRow = createSwitchRow({
         title: 'Afficher les coordonnées',
         description: "Lettres a–h et chiffres 1–8 sur l'échiquier. Masquez-les pour vous entraîner à la notation.",
@@ -279,8 +326,8 @@ export function openSettingsSheet() {
     });
     b.append(coordsRow.el, confirmRow.el);
 
-    // ---- Sons et vibrations ----
-    b.appendChild(el('h3', 'sheet-section-title', 'Sons et vibrations'));
+    // ---- Audio, voix et retours ----
+    b.appendChild(el('h3', 'sheet-section-title', 'Audio, voix et retours'));
     const soundRow = createSwitchRow({
         title: 'Bruit des pièces',
         description: 'Petit bruit de bois quand une pièce se pose.',
@@ -295,7 +342,7 @@ export function openSettingsSheet() {
     });
     const narrationRow = createVoiceSwitchRow({
         title: 'Lecture vocale des leçons',
-        description: "Lit à voix haute les coups et les explications du mode Guidé de l'Académie.",
+        description: "L'Académie lit à voix haute les commentaires du mode Guidé.",
         checked: prefs.current.narration,
         onToggle: (v) => prefs.setNarration(v),
     });
@@ -318,20 +365,25 @@ export function openSettingsSheet() {
     const eloInfo = el('p', 'muted-small mt-4', '');
     b.append(pseudo1.el, pseudo2.el, eloInfo);
 
-    // ---- Palette de couleurs ----
-    b.appendChild(el('h3', 'sheet-section-title', 'Palette de couleurs'));
+    // ---- Couleurs de l'application ----
+    b.appendChild(el('h3', 'sheet-section-title', "Couleurs de l'application"));
     const paletteIntro = el(
         'p',
         'muted-small mb-6',
-        "Chaque palette adapte l'interface et l'échiquier, en mode Jour comme en mode Nuit.",
+        "Chaque palette adapte l'interface, en mode Jour comme en mode Nuit.",
     );
     const paletteList = el('div', 'palette-list');
     paletteList.setAttribute('role', 'radiogroup');
-    paletteList.setAttribute('aria-label', 'Palette de couleurs');
+    paletteList.setAttribute('aria-label', "Couleurs de l'application");
     const paletteOptions = DuckPalette.entries.map((entry) =>
         createPaletteOption(entry, (ord) => prefs.setPalette(ord)));
     paletteList.append(...paletteOptions.map((opt) => opt.el));
     b.append(paletteIntro, paletteList);
+
+    // ---- Couleurs de l'échiquier ----
+    b.appendChild(el('h3', 'sheet-section-title', "Couleurs de l'échiquier"));
+    const boardPicker = createBoardThemePicker((ord) => prefs.setBoardTheme(ord));
+    b.appendChild(boardPicker.el);
 
     // ---- À propos ----
     b.appendChild(el('h3', 'sheet-section-title', 'À propos'));
@@ -340,8 +392,27 @@ export function openSettingsSheet() {
         'muted-small',
         'ChessDuck fonctionne 100 % hors-ligne. Moteur : Stockfish 19 Lite WASM (GPLv3). Problèmes : base ouverte Lichess (CC0). Pièces : série classique de Cburnett et pièce féerique Girafe, Wikimedia Commons (CC BY-SA 3.0). Icônes : Material Icons (Apache 2.0). Police du mode enfant : Fredoka (OFL).',
     );
-    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.4.8');
-    b.append(aboutText, copyright);
+    b.appendChild(aboutText);
+
+    // ---- Réinitialisation ----
+    b.appendChild(el('h3', 'sheet-section-title', 'Réinitialisation'));
+    const resetEloBtn = duckButton({
+        label: 'Réinitialiser mon ELO',
+        icon: 'Replay',
+        variant: 'outlined',
+        className: 'full-w',
+        enabled: prefs.current.elo !== DEFAULT_ELO,
+        onClick: () => {
+            openConfirmDialog({
+                title: 'Réinitialiser votre ELO ?',
+                text: `Votre classement repartira de ${DEFAULT_ELO}. L'historique des parties est conservé.`,
+                confirmLabel: 'Réinitialiser',
+                onConfirm: () => prefs.setElo(DEFAULT_ELO),
+            });
+        },
+    });
+    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.5.1');
+    b.append(resetEloBtn, copyright);
 
     function sync(st) {
         if (closed) return;
@@ -363,6 +434,8 @@ export function openSettingsSheet() {
         for (const opt of paletteOptions) {
             opt.update(dark, opt.ordinal === currentPal.ordinal);
         }
+        boardPicker.sync(BoardTheme.of(st.boardTheme).ordinal);
+        resetEloBtn.disabled = st.elo === DEFAULT_ELO;
     }
 
     unsubPrefs = prefs.subscribe(sync);
