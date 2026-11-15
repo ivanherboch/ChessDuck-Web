@@ -2,12 +2,13 @@ const STORAGE_KEY = 'chessduck_v2_settings';
 
 export const DEFAULT_SETTINGS = Object.freeze({
     themeMode: 2,          // 0 = système, 1 = Jour, 2 = Nuit
-    dynamicColor: false,   // Conservé pour parité schéma, non utilisé sur Web
+    palette: 0,            // 0 = Ardoise & Or, 1 = Améthyste, 2 = Noyer, 3 = Graphite & Rose, 4 = Bleu-Orange
     coords: true,
     confirmActions: true,
     notationBest: 0,
     haptics: true,
     sound: true,
+    narration: false,      // Lecture à voix haute des commentaires de l'Académie (mode Guidé)
     kidMode: false,
     recentPuzzles: [],
     knownThemePuzzles: [],
@@ -34,6 +35,8 @@ function loadInitial() {
         return {
             ...DEFAULT_SETTINGS,
             ...parsed,
+            palette: Number.isInteger(parsed.palette) ? parsed.palette : 0,
+            narration: Boolean(parsed.narration),
             recentPuzzles: Array.isArray(parsed.recentPuzzles) ? parsed.recentPuzzles : [],
             knownThemePuzzles: Array.isArray(parsed.knownThemePuzzles) ? parsed.knownThemePuzzles : [],
         };
@@ -68,6 +71,7 @@ class PrefsStore {
     }
 
     setThemeMode(v) { this._update({ themeMode: v }); }
+    setPalette(v) { this._update({ palette: v }); }
     setCoords(v) { this._update({ coords: Boolean(v) }); }
     setConfirmActions(v) { this._update({ confirmActions: Boolean(v) }); }
     setNotationBest(v) {
@@ -75,6 +79,7 @@ class PrefsStore {
     }
     setHaptics(v) { this._update({ haptics: Boolean(v) }); }
     setSound(v) { this._update({ sound: Boolean(v) }); }
+    setNarration(v) { this._update({ narration: Boolean(v) }); }
     setKidMode(v) { this._update({ kidMode: Boolean(v) }); }
 
     pushRecentPuzzle(id) {

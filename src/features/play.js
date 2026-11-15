@@ -440,7 +440,12 @@ export class PlayFeature {
         const s = this.state;
         if (s.thinking) return;
         const t = Math.max(0, Math.min(s.line.size, n));
-        if (t !== s.cursor) this._navigate(t - s.cursor);
+        if (t === s.cursor) return;
+        s.anim = LinePlaybackController.transition(s.line, s.cursor, t);
+        s.cursor = t;
+        s.hintStage = 0;
+        this._renderLive();
+        this._precompute();
     }
 
     undoMove() {
@@ -453,18 +458,7 @@ export class PlayFeature {
     }
 
     _navigate(delta) {
-        const s = this.state;
-        if (s.thinking) return;
-        const t = Math.max(0, Math.min(s.line.size, s.cursor + delta));
-        if (t === s.cursor) return;
-        const anim = delta > 0
-            ? moveAnim(s.line.positions[s.cursor], s.line.moves[s.cursor])
-            : undoAnim(s.line.positions[t], s.line.moves[t]);
-        s.cursor = t;
-        s.anim = anim;
-        s.hintStage = 0;
-        this._renderLive();
-        this._precompute();
+        this.goTo(this.state.cursor + delta);
     }
 
     resign() {
@@ -480,6 +474,11 @@ export class PlayFeature {
     async _finish(end, resignedWhite) {
         const s = this.state;
         const line = s.line;
+        if (end !== GameEnd.NONE) {
+            this._precomputeAbort?.abort();
+            this._precomputeAbort = null;
+            s.analysis.set(line.size, Analysis.decided(line.last, end));
+        }
         let whiteResult;
         if (resignedWhite !== null && resignedWhite !== undefined) whiteResult = resignedWhite ? -1 : 1;
         else if (end === GameEnd.CHECKMATE) whiteResult = line.last.whiteToMove ? -1 : 1;

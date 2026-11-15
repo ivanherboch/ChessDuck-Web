@@ -2,7 +2,7 @@ import {
     KING, KNIGHT, BISHOP, Move, PAWN, PIECE_VALUES, fileOf, isWhite, pieceType, rankOf, sqName,
 } from '../core/chess.js';
 import { PieceLexiconFr } from '../core/piece-fr.js';
-import { isMateScore, mateIn, winPercent } from '../core/stockfish.js';
+import { mateFor, winPercent } from '../core/stockfish.js';
 import { GameLogic } from './game-logic.js';
 
 const Tone = Object.freeze({
@@ -61,7 +61,7 @@ function describe(v, p, m, san, prev) {
     } else if (m.promo !== 0) {
         base = `mène son pion à promotion et obtient ${PieceLexiconFr.indefinite(m.promo)}`;
     } else if (p.isCapture(m)) {
-        const victim = p.isEnPassant(m) ? PAWN : pieceType(p.board[m.to]);
+        const victim = p.capturedType(m);
         base = (prev != null && prev.to === m.to ? 'reprend en capturant ' : 'capture ') + the(victim) + ` en ${sqName(m.to)}`;
     } else if (p.fullmove <= 12 && (t === KNIGHT || t === BISHOP) && rankOf(m.from) === (v.white ? 0 : 7)) {
         base = `développe ${PieceLexiconFr.possessive(t, false)}`;
@@ -83,21 +83,19 @@ function explain(v, p, m, san, a0, a1) {
     const reply = replyCand && after.isLegal(replyCand) ? replyCand : null;
     const bestCand = a0.best ? Move.fromUci(a0.best) : null;
     const best = bestCand && p.isLegal(bestCand) && !bestCand.equals(m) ? bestCand : null;
-    const sign = p.whiteToMove ? 1 : -1;
 
     // 1. Le coup autorise un mat rapide.
-    const oppScore = -sign * a1.eval;
-    if (isMateScore(oppScore) && oppScore > 0 && reply) {
-        const n = mateIn(oppScore);
-        if (n <= 2) {
-            return `en jouant ${san}, ${v.f('tu permets', 'il permet')} à l'adversaire de faire échec et mat en ${n} (${after.san(reply)}).`;
+    const oppMate = mateFor(a1.eval, !p.whiteToMove);
+    if (oppMate !== null && reply) {
+        if (oppMate <= 2) {
+            return `en jouant ${san}, ${v.f('tu permets', 'il permet')} à l'adversaire de faire échec et mat en ${oppMate} (${after.san(reply)}).`;
         }
         return `${san} laisse l'adversaire lancer une attaque décisive contre ${v.f('ton', 'son')} roi.`;
     }
     // 2. Une pièce est laissée en prise.
     if (reply && after.isCapture(reply)) {
-        const victim = after.isEnPassant(reply) ? PAWN : pieceType(after.board[reply.to]);
-        const gained = p.isCapture(m) ? PIECE_VALUES[p.isEnPassant(m) ? PAWN : pieceType(p.board[m.to])] : 0;
+        const victim = after.capturedType(reply);
+        const gained = p.isCapture(m) ? PIECE_VALUES[p.capturedType(m)] : 0;
         if (PIECE_VALUES[victim] > gained) {
             const rs = after.san(reply);
             return reply.to === m.to
@@ -110,7 +108,7 @@ function explain(v, p, m, san, a0, a1) {
         const bt = pieceType(p.board[best.from]);
         // 3. Une capture avantageuse a été manquée.
         if (p.isCapture(best)) {
-            const victim = p.isEnPassant(best) ? PAWN : pieceType(p.board[best.to]);
+            const victim = p.capturedType(best);
             const free = p.attackers(best.to, !p.whiteToMove).length === 0;
             if (free || PIECE_VALUES[victim] >= PIECE_VALUES[bt]) {
                 return `${v.f('tu as', 'il a')} manqué l'occasion de capturer ${the(victim)} en ${sqName(best.to)} avec ${bs} : cela ${v.f("t'", 'lui ')}aurait donné l'avantage.`;
@@ -189,9 +187,13 @@ export const ReviewComments = {
         if (mm !== null) {
             const bestMove = a0.best ? p.san(Move.fromUci(a0.best)) : null;
             const how = mm === 1 ? 'matait immédiatement' : 'forçait le mat en 2 coups';
+            const left = mateFor(a1.eval, p.whiteToMove);
+            const now = left === null
+                ? ` Après ${san}, le mat n'est plus forcé.`
+                : ` Après ${san}, ${v.f('il te faut', 'il lui faut')} encore ${left} ${left > 1 ? 'coups' : 'coup'} pour mater.`;
             return {
                 text: `⚠️ Mat en ${mm} manqué · ${v.label} : ${v.f('tu pouvais', 'il pouvait')} gagner tout de suite` +
-                    (bestMove ? `, ${bestMove} ${how}.` : '.') + trend,
+                    (bestMove ? `, ${bestMove} ${how}.` : '.') + now + trend,
                 tone: Tone.BAD,
             };
         }

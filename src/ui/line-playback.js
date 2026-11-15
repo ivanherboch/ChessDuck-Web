@@ -51,12 +51,14 @@ export class LinePlaybackController {
         asyncFn({ isCancelled, wait });
     }
 
-    autoplay({ cursor, size, delayFor, checkBeforeDelay, advance, onEnd }) {
+    autoplay({ cursor, size, delayFor, checkBeforeDelay, awaitReady = async () => {}, advance, onEnd }) {
         this.launch(async ({ isCancelled, wait }) => {
             while (!isCancelled()) {
                 const before = cursor();
                 if (before === null || before === undefined) return;
                 if (checkBeforeDelay && before >= size()) break;
+                await awaitReady();
+                if (isCancelled()) return;
                 const ok = await wait(delayFor(before));
                 if (!ok || isCancelled()) return;
                 const now = cursor();

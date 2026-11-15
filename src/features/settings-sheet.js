@@ -1,6 +1,8 @@
 import { prefs } from '../data/prefs.js';
 import { createSheet, duckButton, duckSegmentedRow, el } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
+import { narrator } from '../ui/narrator.js';
+import { DuckPalette, isDarkTheme } from '../ui/theme.js';
 
 function createSwitchRow({ title, description, checked, onChange }) {
     const row = document.createElement('button');
@@ -92,10 +94,64 @@ function createPseudoField({ label, initial, fallback, onSave }) {
     };
 }
 
+function createPaletteOption(palette, dark, selected, onClick) {
+    const p = palette.colors(dark);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `palette-option${selected ? ' is-selected' : ''}`;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-checked', String(Boolean(selected)));
+    btn.setAttribute('aria-label', `${palette.title}. ${palette.description}`);
+
+    const preview = el('div', 'palette-preview');
+    preview.style.background = p.bg;
+    preview.style.borderColor = p.outlineStrong;
+
+    const topBar = el('div', 'palette-preview-bar');
+    topBar.style.background = p.goldRole.fill;
+
+    const bottomRow = el('div', 'palette-preview-bottom');
+    const card = el('div', 'palette-preview-card');
+    card.style.background = p.surface;
+    for (const col of [p.greenRole.fill, p.blueRole.fill, p.redRole.fill]) {
+        const dot = el('span', 'palette-preview-dot');
+        dot.style.background = col;
+        card.appendChild(dot);
+    }
+
+    const sqPair = el('div', 'palette-preview-squares');
+    const sqL = el('span', 'palette-preview-sq');
+    sqL.style.background = p.squareLight;
+    const sqD = el('span', 'palette-preview-sq');
+    sqD.style.background = p.squareDark;
+    sqPair.append(sqL, sqD);
+
+    bottomRow.append(card, sqPair);
+    preview.append(topBar, bottomRow);
+
+    const copy = el('div', 'palette-option-copy');
+    copy.append(
+        el('div', 'palette-option-title', palette.title),
+        el('div', 'palette-option-desc', palette.description),
+    );
+
+    const radio = el('span', `duck-radio${selected ? ' is-checked' : ''}`);
+    radio.setAttribute('aria-hidden', 'true');
+
+    btn.append(preview, copy, radio);
+    btn.addEventListener('click', () => {
+        feedback.key();
+        onClick();
+    });
+    return btn;
+}
+
 export function openSettingsSheet() {
     let unsub = null;
     let pseudo1 = null;
     let pseudo2 = null;
+
+    narrator.prepare();
 
     const sheet = createSheet('Paramètres', () => {
         pseudo1?.flush();
@@ -105,6 +161,26 @@ export function openSettingsSheet() {
     });
 
     const b = sheet.body;
+
+    // ---- Mode enfant ----
+    b.appendChild(el('h3', 'sheet-section-title', 'Mode enfant'));
+    const kidBtn = duckButton({
+        label: 'Activer le mode enfant',
+        accent: 'green',
+        filled: true,
+        icon: 'ChildCare',
+        className: 'full-w',
+        onClick: () => {
+            sheet.close();
+            prefs.setKidMode(true);
+        },
+    });
+    const kidDesc = el(
+        'p',
+        'muted-small mt-6',
+        'Un écran joyeux et coloré pour jouer à deux avec un enfant : grand échiquier, cavalier en forme de girafe, animations qui montrent comment chaque pièce bouge, sans ordinateur ni historique.',
+    );
+    b.append(kidBtn, kidDesc);
 
     // ---- Apparence ----
     b.appendChild(el('h3', 'sheet-section-title', 'Apparence'));
@@ -141,7 +217,17 @@ export function openSettingsSheet() {
         checked: prefs.current.haptics,
         onChange: (v) => prefs.setHaptics(v),
     });
-    b.append(soundRow.el, hapticsRow.el);
+    const narrationRow = createSwitchRow({
+        title: 'Lecture vocale des leçons',
+        description: "Lit à voix haute les coups et les explications du mode Guidé de l'Académie.",
+        checked: prefs.current.narration,
+        onChange: (v) => {
+            if (v) narrator.prepare();
+            else narrator.stop();
+            prefs.setNarration(v);
+        },
+    });
+    b.append(soundRow.el, hapticsRow.el, narrationRow.el);
 
     // ---- Joueurs ----
     b.appendChild(el('h3', 'sheet-section-title', 'Joueurs'));
@@ -160,25 +246,17 @@ export function openSettingsSheet() {
     const eloInfo = el('p', 'muted-small mt-4', '');
     b.append(pseudo1.el, pseudo2.el, eloInfo);
 
-    // ---- Mode enfant ----
-    b.appendChild(el('h3', 'sheet-section-title', 'Mode enfant'));
-    const kidBtn = duckButton({
-        label: 'Activer le mode enfant',
-        accent: 'green',
-        filled: true,
-        icon: 'ChildCare',
-        className: 'full-w',
-        onClick: () => {
-            sheet.close();
-            prefs.setKidMode(true);
-        },
-    });
-    const kidDesc = el(
+    // ---- Palette de couleurs ----
+    b.appendChild(el('h3', 'sheet-section-title', 'Palette de couleurs'));
+    const paletteIntro = el(
         'p',
-        'muted-small mt-6',
-        'Un écran joyeux et coloré pour jouer à deux avec un enfant : grand échiquier, cavalier en forme de girafe, animations qui montrent comment chaque pièce bouge, sans ordinateur ni historique.',
+        'muted-small mb-6',
+        "Chaque palette adapte l'interface et l'échiquier, en mode Jour comme en mode Nuit.",
     );
-    b.append(kidBtn, kidDesc);
+    const paletteList = el('div', 'palette-list');
+    paletteList.setAttribute('role', 'radiogroup');
+    paletteList.setAttribute('aria-label', 'Palette de couleurs');
+    b.append(paletteIntro, paletteList);
 
     // ---- À propos ----
     b.appendChild(el('h3', 'sheet-section-title', 'À propos'));
@@ -187,7 +265,7 @@ export function openSettingsSheet() {
         'muted-small',
         'ChessDuck fonctionne 100 % hors-ligne. Moteur : Stockfish 19 Lite WASM (GPLv3). Problèmes : base ouverte Lichess (CC0). Pièces : série classique de Cburnett et pièce féerique Girafe, Wikimedia Commons (CC BY-SA 3.0). Icônes : Material Icons (Apache 2.0). Police du mode enfant : Fredoka (OFL).',
     );
-    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.2.6');
+    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.4.2');
     b.append(aboutText, copyright);
 
     function sync(st) {
@@ -200,9 +278,21 @@ export function openSettingsSheet() {
         confirmRow.setChecked(st.confirmActions);
         soundRow.setChecked(st.sound);
         hapticsRow.setChecked(st.haptics);
+        narrationRow.setChecked(st.narration);
         pseudo1.syncExternal(st.pseudo);
         pseudo2.syncExternal(st.pseudo2);
         eloInfo.textContent = `Classement actuel : ${st.elo} ELO (formule FIDE, K = 32). Les parties à 2 joueurs ne comptent pas.`;
+
+        const dark = isDarkTheme(st.themeMode);
+        const currentPal = DuckPalette.of(st.palette);
+        paletteList.replaceChildren(
+            ...DuckPalette.entries.map((entry) => createPaletteOption(
+                entry,
+                dark,
+                entry.ordinal === currentPal.ordinal,
+                () => prefs.setPalette(entry.ordinal),
+            )),
+        );
     }
 
     unsub = prefs.subscribe(sync);

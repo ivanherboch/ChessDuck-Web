@@ -4,13 +4,18 @@ export const MATE = 100_000;
 export function isMateScore(s) { return Math.abs(s) > MATE - 1000; }
 export function mateIn(s) { return s > 0 ? Math.trunc((MATE - s + 1) / 2) : -Math.trunc((MATE + s + 1) / 2); }
 
+/** Nombre de coups avant mat forcé en faveur de `white` (evalWhite du point de vue des Blancs), ou null. */
+export function mateFor(evalWhite, white) {
+    return isMateScore(evalWhite) && (evalWhite > 0) === Boolean(white)
+        ? Math.abs(mateIn(evalWhite))
+        : null;
+}
+
 /** Probabilité de gain (0–100) estimée à partir d'une évaluation en centipions (formule Lichess). */
 export function winPercent(cp) {
     if (isMateScore(cp)) return cp > 0 ? 100.0 : 0.0;
     return 50.0 + 50.0 * (2.0 / (1.0 + Math.exp(-0.00368208 * cp)) - 1.0);
 }
-
-const UCI_MOVE = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 
 function parseInfo(l) {
     const t = l.split(' ');
@@ -29,7 +34,7 @@ function parseInfo(l) {
             score = kind === 'mate' ? (v > 0 ? MATE - (2 * v - 1) : -MATE - 2 * v) : v;
         } else if (tok === 'pv') {
             const mv = t[i + 1];
-            if (mv && UCI_MOVE.test(mv)) move = Move.fromUci(mv);
+            if (mv && Move.isUci(mv)) move = Move.fromUci(mv);
             break;
         }
     }
@@ -176,7 +181,7 @@ export class StockfishEngine {
                             if (parsed) pvs.set(parsed.idx, parsed.pv);
                         } else if (l.startsWith('bestmove')) {
                             const tok = l.split(' ')[1];
-                            best = tok && UCI_MOVE.test(tok) ? Move.fromUci(tok) : null;
+                            best = tok && Move.isUci(tok) ? Move.fromUci(tok) : null;
                             done = true;
                             finish();
                         }

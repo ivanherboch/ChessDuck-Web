@@ -1,4 +1,5 @@
 import { CATEGORY_LABELS, Lessons } from '../core/lessons.js';
+import { SpokenFr } from '../core/spoken-fr.js';
 import { db } from '../data/db.js';
 import { prefs } from '../data/prefs.js';
 import { ChessBoardView } from '../ui/board.js';
@@ -9,6 +10,7 @@ import {
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 import { LinePlaybackController, moveAnim } from '../ui/line-playback.js';
+import { narrator } from '../ui/narrator.js';
 import { openLessonCatalog } from './lesson-catalog.js';
 
 export function moveLabel(fullmove, white, san) {
@@ -44,11 +46,24 @@ export class AcademyFeature {
         this._palette = null;
         this._showCoords = true;
         this._catalog = null;
+        this._lastNarration = prefs.current.narration;
 
         this._unsubLessons = db.subscribeMasteredLessons((set) => {
             this.mastered = new Set(set);
             this._catalog?.updateMastered(this.mastered);
             if (Lessons.all.length) this._render();
+        });
+
+        this._unsubNarrator = narrator.subscribe(() => {
+            if (Lessons.all.length && !this.state.challenge) this._render();
+        });
+
+        this._unsubPrefs = prefs.subscribe((st) => {
+            if (st.narration !== this._lastNarration) {
+                this._lastNarration = st.narration;
+                if (!st.narration) narrator.stop();
+                if (Lessons.all.length && !this.state.challenge) this._render();
+            }
         });
 
         this._init();
@@ -66,7 +81,10 @@ export class AcademyFeature {
 
     destroy() {
         this.playback.cancel();
+        narrator.stop();
         this._unsubLessons?.();
+        this._unsubNarrator?.();
+        this._unsubPrefs?.();
         this.board.destroy();
         this.feedbackCard.destroy();
         this.layout.destroy();
@@ -84,8 +102,37 @@ export class AcademyFeature {
         this.board.draw();
     }
 
+    onDeactivate() {
+        this.silence();
+    }
+
+    silence() {
+        this.pause();
+        narrator.stop();
+    }
+
     get lesson() {
         return Lessons.byId(this.state.lessonId);
+    }
+
+    spokenStep() {
+        const l = this.lesson;
+        if (!l) return '';
+        const c = Math.max(0, Math.min(l.line.size, this.state.cursor));
+        return c === 0
+            ? SpokenFr.text(`${l.title}. ${l.summary}`)
+            : `${SpokenFr.move(l.line.sans[c - 1])}. ${SpokenFr.text(l.texts[c - 1])}`;
+    }
+
+    narrate() {
+        if (prefs.current.narration && !this.state.challenge) {
+            narrator.speak(this.spokenStep());
+        }
+    }
+
+    toggleSpeech() {
+        if (narrator.speaking) narrator.stop();
+        else narrator.speak(this.spokenStep());
     }
 
     _buildDom() {
@@ -156,6 +203,7 @@ export class AcademyFeature {
         } else {
             this.state.message = '';
             this.state.tone = Tone.INFO;
+            if (save) this.narrate();
         }
         this._render();
     }
@@ -184,7 +232,12 @@ export class AcademyFeature {
         this.state.done = false;
         this.state.message = '';
         this.state.tone = Tone.INFO;
-        if (on) this._startChallenge();
+        if (on) {
+            narrator.stop();
+            this._startChallenge();
+        } else {
+            this.narrate();
+        }
         this._render();
     }
 
@@ -196,6 +249,7 @@ export class AcademyFeature {
         if (t === this.state.cursor) return;
         this.state.anim = LinePlaybackController.transition(l.line, this.state.cursor, t);
         this.state.cursor = t;
+        this.narrate();
         this._render();
     }
 
@@ -232,13 +286,15 @@ export class AcademyFeature {
         if (!l) return;
         this.playback.cancel();
         if (this.state.cursor >= l.line.size) this.goTo(0);
+        else this.narrate();
         this.state.playing = true;
         this._render();
         this.playback.autoplay({
             cursor: () => this.state.cursor,
             size: () => l.line.size,
-            delayFor: (c) => (c === 0 ? 700 : 2600),
+            delayFor: (c) => (prefs.current.narration ? 600 : (c === 0 ? 700 : 2600)),
             checkBeforeDelay: true,
+            awaitReady: () => narrator.awaitIdle(),
             advance: (t) => this.goTo(t),
             onEnd: () => {
                 this.state.playing = false;
@@ -449,7 +505,17 @@ export class AcademyFeature {
                 onClick: () => this.last(),
             });
             bNext.style.flex = '1';
-            this.actionRow.replaceChildren(bPrev, bPlay, bNext);
+            const buttons = [bPrev, bPlay, bNext];
+            if (prefs.current.narration) {
+                const speaking = narrator.speaking;
+                const bSpeech = duckIconButton({
+                    icon: speaking ? 'VolumeOff' : 'VolumeUp',
+                    ariaLabel: speaking ? 'Arrêter la lecture à voix haute' : 'Réécouter le commentaire',
+                    onClick: () => this.toggleSpeech(),
+                });
+                buttons.unshift(bSpeech);
+            }
+            this.actionRow.replaceChildren(...buttons);
         } else {
             const side = l.heroWhite ? 'Blancs' : 'Noirs';
             const title = s.done ? 'Défi réussi' : `Défi : jouez les ${side} · coup ${cur} / ${line.size}`;

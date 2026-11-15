@@ -2793,6 +2793,130 @@ button.move-strip-item {
     color: var(--muted);
 }
 
+.mb-6 {
+    margin-bottom: 6px;
+}
+
+.palette-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.palette-option {
+    width: 100%;
+    padding: 10px;
+    border-radius: 14px;
+    background: var(--surface);
+    border: 1px solid var(--outline);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.palette-option.is-selected {
+    border: 2px solid var(--gold-text);
+    padding: 9px;
+}
+
+.palette-preview {
+    flex: 0 0 92px;
+    width: 92px;
+    height: 60px;
+    border-radius: 10px;
+    border: 1px solid var(--outline-strong);
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+}
+
+.palette-preview-bar {
+    width: 100%;
+    height: 8px;
+    border-radius: 3px;
+}
+
+.palette-preview-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+}
+
+.palette-preview-card {
+    flex: 1 1 0;
+    height: 28px;
+    border-radius: 5px;
+    padding: 0 5px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.palette-preview-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 8px;
+}
+
+.palette-preview-squares {
+    display: flex;
+    border-radius: 4px;
+    overflow: hidden;
+    flex: 0 0 auto;
+}
+
+.palette-preview-sq {
+    width: 14px;
+    height: 28px;
+    display: block;
+}
+
+.palette-option-copy {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.palette-option-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.palette-option-desc {
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+.duck-radio {
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid var(--muted);
+    position: relative;
+}
+
+.duck-radio.is-checked {
+    border-color: var(--gold-text);
+}
+
+.duck-radio.is-checked::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--gold-text);
+}
+
 .settings-copyright {
     margin: 10px 0 4px;
     font-size: 12px;

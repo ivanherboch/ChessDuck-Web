@@ -1,5 +1,7 @@
-import { MATE } from '../core/stockfish.js';
+import { GameEnd } from '../core/chess.js';
 import { Analysis } from './game-logic.js';
+
+const MAX_CACHED = 20;
 
 /**
  * Analyse des positions et des parties terminées, partagée par le Jeu Libre (indices, analyse lancée à la fin
@@ -31,7 +33,7 @@ export class GameAnalysisService {
     /** Évaluation d'une position (point de vue des Blancs) et meilleur coup ; null si le moteur ne répond pas. */
     async analyse(pos, ms, signal = null) {
         if (pos.legalMoves.length === 0) {
-            return new Analysis(pos.inCheck ? (pos.whiteToMove ? -MATE : MATE) : 0, null, '');
+            return Analysis.decided(pos, pos.inCheck ? GameEnd.CHECKMATE : GameEnd.STALEMATE);
         }
         const r = await this.engine.search(pos.toFen(), ms, { multiPv: 2, signal });
         if (!r || !r.lines || !r.lines.length) return null;
@@ -60,6 +62,10 @@ export class GameAnalysisService {
         this._running = true;
 
         const list = this.analysisOf(g, line).slice();
+        if (!this._analyses.has(g.id) && this._analyses.size >= MAX_CACHED) {
+            const firstKey = this._analyses.keys().next().value;
+            if (firstKey !== undefined) this._analyses.delete(firstKey);
+        }
         this._analyses.set(g.id, list.slice());
         this._emit();
 

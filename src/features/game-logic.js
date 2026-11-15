@@ -1,7 +1,7 @@
 import {
-    GameEnd, KING, Move, PAWN, PIECE_VALUES, pieceType,
+    GameEnd, KING, PAWN, PIECE_VALUES, pieceType,
 } from '../core/chess.js';
-import { isMateScore, mateIn, winPercent } from '../core/stockfish.js';
+import { MATE, mateFor, winPercent } from '../core/stockfish.js';
 
 /** Analyse d'une position : évaluations (point de vue des Blancs) du meilleur et du 2e coup. */
 export class Analysis {
@@ -20,6 +20,15 @@ export class Analysis {
             && this.eval === other.eval
             && this.second === other.second
             && this.best === other.best;
+    }
+
+    /** Évaluation figée d'une position où la partie est terminée (mat : ±MATE, toute nulle : 0). */
+    static decided(pos, end) {
+        return new Analysis(
+            end === GameEnd.CHECKMATE ? (pos.whiteToMove ? -MATE : MATE) : 0,
+            null,
+            '',
+        );
     }
 
     static decodeAll(s, n) {
@@ -102,14 +111,10 @@ export const GameLogic = {
      */
     missedMate(whiteToMove, a0, a1) {
         if (!a0 || !a1) return null;
-        const sign = whiteToMove ? 1 : -1;
-        const before = sign * a0.eval;
-        if (!isMateScore(before) || before <= 0) return null;
-        const k = mateIn(before);
-        if (k < 1 || k > 2) return null;
-        const after = sign * a1.eval;
-        const kept = isMateScore(after) && after > 0 && mateIn(after) <= k - 1;
-        return kept ? null : k;
+        const k = mateFor(a0.eval, whiteToMove);
+        if (k === null || k < 1 || k > 2) return null;
+        const left = mateFor(a1.eval, whiteToMove);
+        return left !== null && left <= k - 1 ? null : k;
     },
 
     endText(end) {

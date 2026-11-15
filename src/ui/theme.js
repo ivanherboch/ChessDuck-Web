@@ -88,6 +88,124 @@ export const KidColors = {
     kid: true,
 };
 
+function makePalette(ordinal, key, label, description, night, day) {
+    return Object.freeze({
+        ordinal,
+        key,
+        label,
+        description,
+        night: Object.freeze(night),
+        day: Object.freeze(day),
+        colors(dark) {
+            return dark ? this.night : this.day;
+        },
+    });
+}
+
+/**
+ * Palettes au choix (Paramètres) : chacune décline les surfaces et l'accent principal en Nuit et en Jour, sans toucher
+ * à l'échiquier en bois ; toutes respectent les contrastes WCAG AA. [BLUE_ORANGE] remplace le couple
+ * vert / rouge (réussite / erreur) par bleu / vermillon (palette Okabe-Ito), lisible avec un daltonisme rouge-vert.
+ */
+const PALETTES = [
+    makePalette(
+        0,
+        'SLATE_GOLD',
+        'Ardoise & Or',
+        'La charte ChessDuck : ardoise et or.',
+        NightColors,
+        DayColors,
+    ),
+    makePalette(
+        1,
+        'AMETHYST',
+        'Améthyste',
+        "Violet profond, assorti à l'icône.",
+        {
+            ...NightColors,
+            bg: '#120F24', surface: '#1F1A38', surfaceSubtle: '#18142E', surfaceHi: '#322B55',
+            muted: '#D4CDEB', outline: '#4C4378', outlineStrong: '#9B92C9',
+            gold: '#A78BFA', goldRole: { text: '#C4B5FD', fill: '#A78BFA', onFill: INK },
+        },
+        {
+            ...DayColors,
+            bg: '#F8F6FE', surface: '#FFFFFF', surfaceSubtle: '#F0ECFC', surfaceHi: '#E2DCF7',
+            text: '#1E1538', muted: '#4E4470', outline: '#CFC6EC', outlineStrong: '#6E62A0',
+            gold: '#7C3AED', goldRole: { text: '#5B21B6', fill: '#6D28D9', onFill: '#FFFFFF' },
+        },
+    ),
+    makePalette(
+        2,
+        'WALNUT',
+        'Noyer',
+        "Bois chaleureux et orange, comme l'échiquier.",
+        {
+            ...NightColors,
+            bg: '#17110D', surface: '#261C16', surfaceSubtle: '#1F1712', surfaceHi: '#3A2C22',
+            text: '#FBF5EF', muted: '#E2D3C4', outline: '#5A463A', outlineStrong: '#A8927F',
+            gold: '#FB923C', goldRole: { text: '#FDBA74', fill: '#FB923C', onFill: INK },
+        },
+        {
+            ...DayColors,
+            bg: '#FBF7F2', surface: '#FFFFFF', surfaceSubtle: '#F6F0E8', surfaceHi: '#E9DDCF',
+            text: '#24170F', muted: '#5E4B3D', outline: '#DCCBB9', outlineStrong: '#8A7360',
+            gold: '#C2410C', goldRole: { text: '#9A3412', fill: '#C2410C', onFill: '#FFFFFF' },
+        },
+    ),
+    makePalette(
+        3,
+        'GRAPHITE_ROSE',
+        'Graphite & Rose',
+        'Gris neutre et rose vif.',
+        {
+            ...NightColors,
+            bg: '#121214', surface: '#1E1E22', surfaceSubtle: '#18181B', surfaceHi: '#323238',
+            text: '#FAFAFA', muted: '#D4D4DC', outline: '#4B4B55', outlineStrong: '#9C9CA8',
+            gold: '#F472B6', goldRole: { text: '#F9A8D4', fill: '#F472B6', onFill: INK },
+        },
+        {
+            ...DayColors,
+            bg: '#F7F7F8', surface: '#FFFFFF', surfaceSubtle: '#EFEFF2', surfaceHi: '#E2E2E7',
+            text: '#18181B', muted: '#52525B', outline: '#D4D4D8', outlineStrong: '#71717A',
+            gold: '#DB2777', goldRole: { text: '#9D174D', fill: '#BE185D', onFill: '#FFFFFF' },
+        },
+    ),
+    makePalette(
+        4,
+        'BLUE_ORANGE',
+        'Bleu-Orange',
+        'Adaptée au daltonisme : réussite en bleu, erreur en vermillon.',
+        {
+            ...NightColors,
+            gold: '#F0E442', goldRole: { text: '#F0E442', fill: '#F0E442', onFill: INK },
+            green: '#56B4E9', greenRole: { text: '#7CC6F0', fill: '#56B4E9', onFill: INK },
+            blue: '#CC79A7', blueRole: { text: '#E3A5C7', fill: '#CC79A7', onFill: INK },
+            red: '#E07A3F', redRole: { text: '#F3A06E', fill: '#E07A3F', onFill: INK },
+            select: '#0072B2',
+        },
+        {
+            ...DayColors,
+            gold: '#F0E442', goldRole: { text: '#6B5D00', fill: '#F0E442', onFill: INK },
+            green: '#0072B2', greenRole: { text: '#005A8C', fill: '#0072B2', onFill: '#FFFFFF' },
+            blue: '#A64D7E', blueRole: { text: '#8E3A68', fill: '#A64D7E', onFill: '#FFFFFF' },
+            red: '#D55E00', redRole: { text: '#A63F00', fill: '#B34D00', onFill: '#FFFFFF' },
+            select: '#0072B2',
+        },
+    ),
+];
+
+export const DuckPalette = Object.freeze({
+    SLATE_GOLD: PALETTES[0],
+    AMETHYST: PALETTES[1],
+    WALNUT: PALETTES[2],
+    GRAPHITE_ROSE: PALETTES[3],
+    BLUE_ORANGE: PALETTES[4],
+    entries: Object.freeze(PALETTES),
+    of(index) {
+        return PALETTES[index] || PALETTES[0];
+    },
+});
+
 export function roleFor(c, accent) {
     if (!accent) return { text: c.text, fill: c.surfaceHi, onFill: c.text };
     if (accent === c.gold || accent === 'gold') return c.goldRole;
@@ -101,14 +219,18 @@ export function isTwoPane(width = window.innerWidth, height = window.innerHeight
     return width > height * 1.15;
 }
 
-export function resolvePalette({ themeMode, kidMode }) {
-    if (kidMode) return KidColors;
-    if (themeMode === 1) return DayColors;
+export function isDarkTheme(themeMode) {
+    if (themeMode === 1) return false;
     if (themeMode === 0) {
-        const prefersDark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-        return prefersDark ? NightColors : DayColors;
+        return typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-color-scheme: dark)').matches);
     }
-    return NightColors;
+    return true;
+}
+
+export function resolvePalette({ themeMode, kidMode, palette = 0 }) {
+    if (kidMode) return KidColors;
+    const dark = isDarkTheme(themeMode);
+    return DuckPalette.of(palette).colors(dark);
 }
 
 export function applyThemeToDom(c) {
@@ -125,6 +247,7 @@ export function applyThemeToDom(c) {
     root.setProperty('--green', c.green);
     root.setProperty('--blue', c.blue);
     root.setProperty('--red', c.red);
+    root.setProperty('--select', c.select);
     const tonalAlpha = c.dark ? 0.16 : 0.14;
     root.setProperty('--gold-text', c.goldRole.text);
     root.setProperty('--gold-fill', c.goldRole.fill);

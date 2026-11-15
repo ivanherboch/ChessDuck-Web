@@ -19,9 +19,14 @@
                 var st = raw ? JSON.parse(raw) : {};
                 var kid = Boolean(st.kidMode);
                 var tm = typeof st.themeMode === 'number' ? st.themeMode : 2;
+                var pal = typeof st.palette === 'number' && st.palette >= 0 && st.palette < 5 ? st.palette : 0;
                 var dark = !kid && (tm === 2 || (tm === 0 && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches));
-                var bg = kid ? '#EBF6FF' : (dark ? '#0F172A' : '#F8FAFC');
-                var fg = kid ? '#1F3B57' : (dark ? '#F8FAFC' : '#0F172A');
+                var nightBg = ['#0F172A', '#13111C', '#1C1612', '#121316', '#0C1424'];
+                var nightFg = ['#F8FAFC', '#F5F3FF', '#FAF3E8', '#F4F4F5', '#F0F6FC'];
+                var dayBg = ['#F8FAFC', '#FAF8FF', '#FBF7F0', '#FAFAFA', '#F5F8FC'];
+                var dayFg = ['#0F172A', '#1E1B2E', '#261C14', '#18181B', '#0C1929'];
+                var bg = kid ? '#EBF6FF' : (dark ? nightBg[pal] : dayBg[pal]);
+                var fg = kid ? '#1F3B57' : (dark ? nightFg[pal] : dayFg[pal]);
                 var root = document.documentElement;
                 root.dataset.theme = kid ? 'kid' : (dark ? 'night' : 'day');
                 root.style.setProperty('--bg', bg);

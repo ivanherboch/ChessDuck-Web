@@ -151,6 +151,7 @@ class ChessDuckApp {
         }
         this.features.forEach((f, i) => {
             if (!f) return;
+            if (i !== index) f.onDeactivate?.();
             f.el.classList.toggle('hidden', i !== index);
         });
         this.memoBtn.classList.toggle('hidden', index !== 0);
@@ -195,6 +196,7 @@ class ChessDuckApp {
         }
 
         if (st.kidMode) {
+            for (const f of this.features) f?.onDeactivate?.();
             if (!this.kidFeature) {
                 this.kidFeature = new KidFeature();
                 this.kidShell.appendChild(this.kidFeature.el);

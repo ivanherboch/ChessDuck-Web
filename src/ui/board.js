@@ -49,7 +49,8 @@ export function evalShort(evalWhite) {
         const m = Math.max(1, Math.abs(mateIn(evalWhite)));
         return `M${m}`;
     }
-    return `${evalWhite >= 0 ? '+' : '−'}${(Math.abs(evalWhite) / 100).toFixed(1)}`;
+    const pawns = Math.abs(evalWhite) / 100.0;
+    return `${evalWhite >= 0 ? '+' : '−'}${Math.abs(evalWhite) >= 1000 ? pawns.toFixed(0) : pawns.toFixed(1)}`;
 }
 
 /** Échiquier interactif HTML5 Canvas avec animation 180 ms, secousse, glisser-déposer et flèches. */

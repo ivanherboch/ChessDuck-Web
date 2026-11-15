@@ -46,6 +46,12 @@ export const GameEnd = Object.freeze({
     REPETITION: 'REPETITION',
 });
 
+const KN_DF = [1, 2, 2, 1, -1, -2, -2, -1];
+const KN_DR = [2, 1, -1, -2, -2, -1, 1, 2];
+const K_DF = [1, 1, 1, 0, -1, -1, -1, 0];
+const K_DR = [1, 0, -1, -1, -1, 0, 1, 1];
+const UCI_RE = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
+
 export class Move {
     constructor(from, to, promo = 0) {
         this.from = from;
@@ -61,6 +67,10 @@ export class Move {
         return other != null && this.from === other.from && this.to === other.to && this.promo === other.promo;
     }
 
+    static isUci(s) {
+        return typeof s === 'string' && UCI_RE.test(s);
+    }
+
     static fromUci(s) {
         return new Move(
             sqFromName(s.slice(0, 2)),
@@ -69,12 +79,6 @@ export class Move {
         );
     }
 }
-
-const KN_DF = [1, 2, 2, 1, -1, -2, -2, -1];
-const KN_DR = [2, 1, -1, -2, -2, -1, 1, 2];
-const K_DF = [1, 1, 1, 0, -1, -1, -1, 0];
-const K_DR = [1, 0, -1, -1, -1, 0, 1, 1];
-const UCI_RE = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 
 /** Position d'échecs immuable : génération de coups légaux, FEN, SAN, UCI. */
 export class Position {
@@ -302,6 +306,10 @@ export class Position {
 
     isEnPassant(m) {
         return pieceType(this.board[m.from]) === PAWN && m.to === this.ep && this.board[m.to] === 0 && fileOf(m.from) !== fileOf(m.to);
+    }
+
+    capturedType(m) {
+        return this.isEnPassant(m) ? PAWN : pieceType(this.board[m.to]);
     }
 
     isCastle(m) {

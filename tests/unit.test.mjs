@@ -299,7 +299,7 @@ test('GameLogic, Stockfish helpers & ReviewComments', () => {
 });
 
 test('WCAG 2.1 AA contrast across Day, Night and Kid palettes', async () => {
-    const { NightColors, DayColors, KidColors } = await import('../src/ui/theme.js');
+    const { DuckPalette, KidColors } = await import('../src/ui/theme.js');
 
     const parseColor = (str) => {
         if (str.startsWith('#')) {
@@ -332,7 +332,14 @@ test('WCAG 2.1 AA contrast across Day, Night and Kid palettes', async () => {
         if (r < min) failures.push(`${name}: ${r.toFixed(2)} < ${min}`);
     };
 
-    for (const [tag, c] of [['Nuit', NightColors], ['Jour', DayColors], ['Enfant', KidColors]]) {
+    const allPalettes = [];
+    for (const p of DuckPalette.entries) {
+        allPalettes.push([`${p.title} Nuit`, p.night]);
+        allPalettes.push([`${p.title} Jour`, p.day]);
+    }
+    allPalettes.push(['Enfant', KidColors]);
+
+    for (const [tag, c] of allPalettes) {
         for (const [sn, s] of [['bg', c.bg], ['surface', c.surface], ['surfaceSubtle', c.surfaceSubtle], ['surfaceHi', c.surfaceHi]]) {
             check(`${tag} text/${sn}`, c.text, s);
             check(`${tag} muted/${sn}`, c.muted, s);
@@ -371,9 +378,10 @@ test('ShareCard & BoardGeometry & LinePlaybackController', () => {
     const desc = ShareCard.describe(pos, l.moves[0], l.sans[0]);
     assert.equal(desc, 'La tour va en e8 : échec et mat !');
 
-    const style = shareStyleFromSettings({ shareFormat: 'SQUARE', shareLight: true });
+    const style = shareStyleFromSettings({ shareFormat: 'SQUARE', shareLight: true, palette: 2 });
     assert.equal(style.format, ShareFormat.SQUARE);
     assert.equal(style.light, true);
+    assert.equal(style.palette.ordinal, 2);
 
     // Knight L-arrow geometry
     const sqs = BoardGeometry.arrowSquares(sqFromName('g1'), sqFromName('f3'));
@@ -421,5 +429,73 @@ test('Prefs: recentPuzzles and knownThemePuzzles tracking & pruning', async () =
     assert.equal(prefs.current.recentPuzzles.includes('p1'), false);
     assert.equal(prefs.current.knownThemePuzzles.includes('p1'), false, 'knownThemePuzzles must prune IDs no longer in recentPuzzles');
     assert.equal(prefs.current.knownThemePuzzles.includes('p3'), true);
+});
+
+test('SpokenFr: SAN move translation and all 113 lesson texts free of English notation (v2.4.2)', async () => {
+    const { SpokenFr } = await import('../src/core/spoken-fr.js');
+
+    assert.equal(SpokenFr.move('e4'), 'e4');
+    assert.equal(SpokenFr.move('Nf3'), 'cavalier f3');
+    assert.equal(SpokenFr.move('Bxf7+'), 'fou prend f7, échec');
+    assert.equal(SpokenFr.move('Qh7#'), 'dame h7, mat');
+    assert.equal(SpokenFr.move('exd5'), 'e prend d5');
+    assert.equal(SpokenFr.move('e8=Q+'), 'e8 promotion en dame, échec');
+    assert.equal(SpokenFr.move('Rad1'), 'tour a d1');
+    assert.equal(SpokenFr.move('R1e2'), 'tour 1 e2');
+    assert.equal(SpokenFr.move('O-O'), 'petit roque');
+    assert.equal(SpokenFr.move('O-O-O+'), 'grand roque, échec');
+    assert.equal(SpokenFr.text('La variante 4.Ng5 attaque f7 avec 1.e4 e5.'), 'La variante cavalier g5 attaque f7 avec e4 e5.');
+
+    const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/lessons.json'), 'utf8'));
+    const lessons = Lessons.initFromData(raw);
+    const leftoverSan = /\b([KQRBN][a-h1-8]?x?[a-h][1-8]|[a-h]x[a-h][1-8]|O-O(-O)?)\b/;
+    for (const l of lessons) {
+        for (const s of [l.title, l.summary, ...l.texts]) {
+            const spoken = SpokenFr.text(s);
+            assert.equal(
+                leftoverSan.test(spoken),
+                false,
+                `Leçon ${l.id} (${l.title}) contient encore de la notation brute après SpokenFr.text : "${spoken}"`,
+            );
+        }
+        for (const san of l.line.sans) {
+            const spokenMove = SpokenFr.move(san);
+            assert.ok(spokenMove.length > 0);
+            assert.equal(/[KQRBN+#=]/.test(spokenMove), false, `Coup non traduit : ${san} -> ${spokenMove}`);
+        }
+    }
+});
+
+test('v2.3.1..v2.4.2: mateFor, Analysis.decided, evalShort rounding & missedMate concordance', async () => {
+    const { mateFor } = await import('../src/core/stockfish.js');
+    const { evalShort } = await import('../src/ui/board.js');
+
+    assert.equal(mateFor(MATE - 1, true), 1);
+    assert.equal(mateFor(MATE - 1, false), null);
+    assert.equal(mateFor(-(MATE - 3), false), 2);
+
+    const matePos = Line.fromSan(START_FEN, ['f3', 'e5', 'g4', 'Qh4#']).last;
+    assert.equal(Analysis.decided(matePos, GameEnd.CHECKMATE).eval, -MATE);
+    assert.equal(Analysis.decided(Position.START, GameEnd.STALEMATE).eval, 0);
+
+    assert.equal(evalShort(150), '+1.5');
+    assert.equal(evalShort(-990), '−9.9');
+    assert.equal(evalShort(1000), '+10');
+    assert.equal(evalShort(-1240), '−12');
+
+    // Missed mate in 1 where mate in 3 remains vs where mate is lost
+    const g = { vsComputer: true, playerWhite: true, whiteName: 'Moi', blackName: '', result: '1-0', reason: 'échec et mat' };
+    const line = Line.fromSan('6k1/5ppp/8/8/8/8/5PPP/3RR1K1 w - - 0 1', ['Kh1']);
+    const cStillMate = ReviewComments.comment(g, line, 0, [
+        new Analysis(MATE - 1, 500, 'e1e8'),
+        new Analysis(MATE - 5, null, 'g8h8'),
+    ]);
+    assert.match(cStillMate.text, /il te faut encore 3 coups pour mater/);
+
+    const cLostMate = ReviewComments.comment(g, line, 0, [
+        new Analysis(MATE - 1, 500, 'e1e8'),
+        new Analysis(300, null, 'g8h8'),
+    ]);
+    assert.match(cLostMate.text, /le mat n'est plus forcé/);
 });
 

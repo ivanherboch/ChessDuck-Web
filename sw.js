@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chessduck-v2.2.6-1';
+const CACHE_NAME = 'chessduck-v2.4.2-1';
 
 const PRECACHE_URLS = [
     './',
@@ -10,6 +10,7 @@ const PRECACHE_URLS = [
     './src/core/lessons.js',
     './src/core/piece-fr.js',
     './src/core/puzzle-themes.js',
+    './src/core/spoken-fr.js',
     './src/core/stockfish.js',
     './src/core/text.js',
     './src/data/db.js',
@@ -21,6 +22,7 @@ const PRECACHE_URLS = [
     './src/ui/feedback.js',
     './src/ui/icons.js',
     './src/ui/line-playback.js',
+    './src/ui/narrator.js',
     './src/ui/pieces.js',
     './src/ui/theme.js',
     './src/features/academy.js',

@@ -5,6 +5,7 @@ import { PieceLexiconFr } from '../core/piece-fr.js';
 import { PuzzleThemes } from '../core/puzzle-themes.js';
 import { BoardGeometry } from '../ui/board-geometry.js';
 import { pieceStore } from '../ui/pieces.js';
+import { DuckPalette, hexToRgba } from '../ui/theme.js';
 
 export const ShareFormat = {
     PORTRAIT: { name: 'PORTRAIT', height: 1350, label: 'Portrait 4:5' },
@@ -13,74 +14,49 @@ export const ShareFormat = {
 
 export function shareStyleFromSettings(settings) {
     const fmt = settings?.shareFormat === 'SQUARE' ? ShareFormat.SQUARE : ShareFormat.PORTRAIT;
-    return { format: fmt, light: Boolean(settings?.shareLight) };
+    return {
+        format: fmt,
+        light: Boolean(settings?.shareLight),
+        palette: DuckPalette.of(settings?.palette ?? 0),
+    };
 }
 
 const W = 1080;
 const M = 44;
 const FOOTER_H = 62;
-const LIGHT_SQ = '#F0D9B5';
-const DARK_SQ = '#B58863';
-const GOLD = '#F59E0B';
-const GREEN = '#10B981';
-const RED = '#EF4444';
-const INK = '#1C1917';
 const FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
-const NIGHT = {
-    light: false,
-    bgTop: '#1E293B',
-    bgBottom: '#0B1220',
-    texture: 'rgba(255, 255, 255, 0.035)',
-    halo: 'rgba(245, 158, 11, 0.17)',
-    text: '#F8FAFC',
-    body: '#E2E8F0',
-    soft: '#CBD5E1',
-    muted: '#94A3B8',
-    faint: '#64748B',
-    surface: '#1A2536',
-    stroke: 'rgba(255, 255, 255, 0.11)',
-    dotOff: '#334155',
-    shadow: 'rgba(0, 0, 0, 0.55)',
-    goldText: '#FBBF24',
-    greenText: '#34D399',
-    greenFill: GREEN,
-    onGreen: '#04221A',
-    redText: '#FCA5A5',
-    blueText: '#7DD3FC',
-};
-
-const DAY = {
-    light: true,
-    bgTop: '#FFFFFF',
-    bgBottom: '#E8EDF3',
-    texture: 'rgba(15, 23, 42, 0.039)',
-    halo: 'rgba(245, 158, 11, 0.18)',
-    text: '#0F172A',
-    body: '#1E293B',
-    soft: '#334155',
-    muted: '#475569',
-    faint: '#64748B',
-    surface: '#FFFFFF',
-    stroke: 'rgba(15, 23, 42, 0.10)',
-    dotOff: '#CBD5E1',
-    shadow: 'rgba(15, 23, 42, 0.24)',
-    goldText: '#92400E',
-    greenText: '#065F46',
-    greenFill: '#047857',
-    onGreen: '#FFFFFF',
-    redText: '#B91C1C',
-    blueText: '#075985',
-};
-
-function hexToRgb(hex) {
-    const h = hex.replace('#', '');
-    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-}
-
-function rgba(hex, alpha) {
-    const [r, g, b] = hexToRgb(hex);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function buildPal(style) {
+    const light = Boolean(style?.light);
+    const palEntry = style?.palette || DuckPalette.SLATE_GOLD;
+    const c = palEntry.colors(!light);
+    return {
+        light,
+        bgTop: light ? c.surface : c.surfaceHi,
+        bgBottom: c.bg,
+        texture: light ? hexToRgba(c.text, 0.039) : 'rgba(255, 255, 255, 0.035)',
+        halo: hexToRgba(c.gold, 0.18),
+        text: c.text,
+        body: c.text,
+        soft: c.muted,
+        muted: c.muted,
+        faint: c.muted,
+        surface: c.surface,
+        stroke: c.outline,
+        dotOff: c.surfaceHi,
+        shadow: light ? hexToRgba(c.text, 0.24) : 'rgba(0, 0, 0, 0.55)',
+        lightSq: c.squareLight,
+        darkSq: c.squareDark,
+        goldText: c.goldRole.text,
+        goldFill: c.goldRole.fill,
+        onGold: c.goldRole.onFill,
+        greenText: c.greenRole.text,
+        greenFill: c.greenRole.fill,
+        onGreen: c.greenRole.onFill,
+        redText: c.redRole.text,
+        redFill: c.redRole.fill,
+        onRed: c.redRole.onFill,
+    };
 }
 
 let mascotPromise = null;
@@ -166,7 +142,7 @@ class Painter {
         let x = right - r;
         const ctx = this.ctx;
         for (let i = 4; i >= 1; i--) {
-            ctx.fillStyle = i <= band ? GOLD : this.pal.dotOff;
+            ctx.fillStyle = i <= band ? this.pal.goldFill : this.pal.dotOff;
             ctx.beginPath();
             ctx.arc(x, y - 11, r, 0, Math.PI * 2);
             ctx.fill();
@@ -236,7 +212,7 @@ class Painter {
         ctx.shadowColor = this.pal.shadow;
         ctx.shadowBlur = side * 0.03;
         ctx.shadowOffsetY = side * 0.012;
-        ctx.fillStyle = DARK_SQ;
+        ctx.fillStyle = this.pal.darkSq;
         ctx.beginPath();
         ctx.roundRect(left, top, side, side, radius);
         ctx.fill();
@@ -248,7 +224,7 @@ class Painter {
         ctx.clip();
 
         for (let q = 0; q < 64; q++) {
-            ctx.fillStyle = (fileOf(q) + rankOf(q)) % 2 === 1 ? LIGHT_SQ : DARK_SQ;
+            ctx.fillStyle = (fileOf(q) + rankOf(q)) % 2 === 1 ? this.pal.lightSq : this.pal.darkSq;
             ctx.fillRect(x(q), y(q), s + 0.5, s + 0.5);
         }
         if (lastMove) {
@@ -272,10 +248,10 @@ class Painter {
             ctx.textBaseline = 'alphabetic';
             for (let i = 0; i < 8; i++) {
                 const fq = flipped ? (7 - i) + 7 * 8 : i;
-                ctx.fillStyle = (fileOf(fq) + rankOf(fq)) % 2 === 1 ? DARK_SQ : LIGHT_SQ;
+                ctx.fillStyle = (fileOf(fq) + rankOf(fq)) % 2 === 1 ? this.pal.darkSq : this.pal.lightSq;
                 ctx.fillText(String.fromCharCode(97 + fileOf(fq)), x(fq) + s * 0.80, y(fq) + s * 0.92);
                 const rq = flipped ? 7 + (7 - i) * 8 : i * 8;
-                ctx.fillStyle = (fileOf(rq) + rankOf(rq)) % 2 === 1 ? DARK_SQ : LIGHT_SQ;
+                ctx.fillStyle = (fileOf(rq) + rankOf(rq)) % 2 === 1 ? this.pal.darkSq : this.pal.lightSq;
                 ctx.fillText(String.fromCharCode(49 + rankOf(rq)), x(rq) + s * 0.07, y(rq) + s * 0.25);
             }
         }
@@ -425,7 +401,7 @@ export const ShareCard = {
         if (p.isCastle(m)) s = fileOf(m.to) === 6 ? 'Petit roque' : 'Grand roque';
         else if (p.isEnPassant(m)) s = `Le pion capture le pion en passant, en ${sqName(m.to)}`;
         else if (p.isCapture(m)) {
-            s = `${PieceLexiconFr.definiteCapitalized(type)} capture ${PieceLexiconFr.definite(pieceType(p.board[m.to]))} en ${sqName(m.to)}`;
+            s = `${PieceLexiconFr.definiteCapitalized(type)} capture ${PieceLexiconFr.definite(p.capturedType(m))} en ${sqName(m.to)}`;
         } else {
             s = `${PieceLexiconFr.definiteCapitalized(type)} va en ${sqName(m.to)}`;
         }
@@ -443,7 +419,7 @@ export const ShareCard = {
 
     async render(puzzle, position, playerWhite, lastMove, style) {
         const [, mascotImg] = await Promise.all([pieceStore.preloadSet(false), loadMascot()]);
-        const pal = style.light ? DAY : NIGHT;
+        const pal = buildPal(style);
         const square = style.format.height === 1080;
         const h = style.format.height;
         const line = Line.fromUci(puzzle.fen, puzzle.moves);
@@ -474,7 +450,7 @@ export const ShareCard = {
 
         if (tip.length) {
             const y = top + side + 16;
-            g.panel(M, y, W - 2 * M, tipH, GOLD);
+            g.panel(M, y, W - 2 * M, tipH, pal.goldFill);
             let ty = y + 14 + tipSize;
             tip.forEach((l, i) => {
                 if (i === 0 && l.startsWith(label)) {
@@ -494,7 +470,7 @@ export const ShareCard = {
 
     async renderSolution(puzzle, style) {
         const [, mascotImg] = await Promise.all([pieceStore.preloadSet(false), loadMascot()]);
-        const pal = style.light ? DAY : NIGHT;
+        const pal = buildPal(style);
         const square = style.format.height === 1080;
         const h = style.format.height;
         const line = Line.fromUci(puzzle.fen, puzzle.moves);
@@ -602,11 +578,11 @@ export const ShareCard = {
                 }
                 const at = g.board(x + (panelW - side) / 2, by, side, st.before, !playerWhite, st.prev, glow);
                 const s = side / 8;
-                if (st.reply) g.arrow(st.reply, at, s, RED, 0.10);
-                g.arrow(st.move, at, s, GREEN, 0.17);
+                if (st.reply) g.arrow(st.reply, at, s, pal.redFill, 0.10);
+                g.arrow(st.move, at, s, pal.greenFill, 0.17);
                 const [dx, dy] = at(st.move.to);
-                if (st.san.endsWith('#')) g.badge('#', dx + s * 0.80, dy + s * 0.20, s * 0.22, RED);
-                else if (st.san.endsWith('+')) g.badge('+', dx + s * 0.80, dy + s * 0.20, s * 0.22, GOLD, INK);
+                if (st.san.endsWith('#')) g.badge('#', dx + s * 0.80, dy + s * 0.20, s * 0.22, pal.redFill, pal.onRed);
+                else if (st.san.endsWith('+')) g.badge('+', dx + s * 0.80, dy + s * 0.20, s * 0.22, pal.goldFill, pal.onGold);
 
                 const ty0 = by + side + 10 + titleSz * 0.95;
                 const br = titleSz * 0.5;
@@ -624,7 +600,7 @@ export const ShareCard = {
                     const ps = titleSz * 1.05;
                     const px = bx + textW - ps;
                     const py = ty0 - ps * 0.8;
-                    g.ctx.fillStyle = LIGHT_SQ;
+                    g.ctx.fillStyle = pal.lightSq;
                     g.ctx.beginPath();
                     g.ctx.roundRect(px, py, ps, ps, 10);
                     g.ctx.fill();
@@ -644,7 +620,7 @@ export const ShareCard = {
                         rLines.forEach((l, i) => {
                             ty += lineH;
                             if (i === 0) {
-                                g.ctx.fillStyle = RED;
+                                g.ctx.fillStyle = pal.redFill;
                                 g.ctx.beginPath();
                                 g.ctx.arc(bx + textSize * 0.25, ty - textSize * 0.34, textSize * 0.2, 0, Math.PI * 2);
                                 g.ctx.fill();
@@ -655,7 +631,7 @@ export const ShareCard = {
                 }
                 if (isLast) {
                     ty += 10;
-                    if (st.san.endsWith('#')) g.pill('Échec et mat !', bx, ty, textSize, GOLD, INK);
+                    if (st.san.endsWith('#')) g.pill('Échec et mat !', bx, ty, textSize, pal.goldFill, pal.onGold);
                     else g.pill('Avantage décisif', bx, ty, textSize, pal.greenFill, pal.onGreen);
                 }
                 x += panelW + gap;
@@ -664,21 +640,21 @@ export const ShareCard = {
         }
 
         const ly = h - FOOTER_H - 18;
-        g.ctx.fillStyle = GREEN;
+        g.ctx.fillStyle = pal.greenFill;
         g.ctx.beginPath();
         g.ctx.roundRect(M, ly - 15, 48, 12, 6);
         g.ctx.fill();
         g.text('votre coup', M + 58, ly, 25, pal.muted);
 
-        g.ctx.fillStyle = RED;
+        g.ctx.fillStyle = pal.redFill;
         g.ctx.beginPath();
         g.ctx.roundRect(M + 230, ly - 13, 48, 8, 4);
         g.ctx.fill();
         g.text('réponse adverse', M + 288, ly, 25, pal.muted);
 
-        g.badge('+', M + 560, ly - 9, 14, GOLD, INK);
+        g.badge('+', M + 560, ly - 9, 14, pal.goldFill, pal.onGold);
         g.text('échec', M + 582, ly, 25, pal.muted);
-        g.badge('#', M + 680, ly - 9, 14, RED);
+        g.badge('#', M + 680, ly - 9, 14, pal.redFill, pal.onRed);
         g.text('mat', M + 702, ly, 25, pal.muted);
         g.footer(h, puzzle.id);
 
