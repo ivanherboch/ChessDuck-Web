@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     haptics: true,
     sound: true,
     narration: false,      // Lecture à voix haute des commentaires de l'Académie (mode Guidé)
+    kidNarration: false,   // Lecture à voix haute des fiches de pièces du mode enfant (réglage parental)
     kidMode: false,
     recentPuzzles: [],
     knownThemePuzzles: [],
@@ -47,6 +48,7 @@ function loadInitial() {
             haptics: parsed.haptics !== undefined ? Boolean(parsed.haptics) : DEFAULT_SETTINGS.haptics,
             sound: parsed.sound !== undefined ? Boolean(parsed.sound) : DEFAULT_SETTINGS.sound,
             narration: Boolean(parsed.narration),
+            kidNarration: Boolean(parsed.kidNarration),
             kidMode: Boolean(parsed.kidMode),
             recentPuzzles: Array.isArray(parsed.recentPuzzles) ? parsed.recentPuzzles.filter((x) => typeof x === 'string' && x) : [],
             knownThemePuzzles: Array.isArray(parsed.knownThemePuzzles) ? parsed.knownThemePuzzles.filter((x) => typeof x === 'string' && x) : [],
@@ -94,6 +96,7 @@ class PrefsStore {
     setHaptics(v) { this._update({ haptics: Boolean(v) }); }
     setSound(v) { this._update({ sound: Boolean(v) }); }
     setNarration(v) { this._update({ narration: Boolean(v) }); }
+    setKidNarration(v) { this._update({ kidNarration: Boolean(v) }); }
     setKidMode(v) { this._update({ kidMode: Boolean(v) }); }
 
     pushRecentPuzzle(id) {

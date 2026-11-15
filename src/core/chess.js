@@ -316,10 +316,6 @@ export class Position {
         return pieceType(this.board[m.from]) === KING && Math.abs(fileOf(m.from) - fileOf(m.to)) === 2;
     }
 
-    isPromotionMove(from, to) {
-        return pieceType(this.board[from]) === PAWN && (rankOf(to) === 7 || rankOf(to) === 0);
-    }
-
     play(m) {
         const b = this.board.slice();
         const p = b[m.from];
@@ -365,7 +361,6 @@ export class Position {
     }
 
     get isCheckmate() { return this.inCheck && this.legalMoves.length === 0; }
-    get isStalemate() { return !this.inCheck && this.legalMoves.length === 0; }
 
     get insufficientMaterial() {
         let minors = 0;

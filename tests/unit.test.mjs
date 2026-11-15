@@ -1215,4 +1215,166 @@ test('iPhone top-blur mitigation: status-bar meta, isIosDevice & computeIosTopGa
     assert.equal(computeIosTopGap({ isIos: true, standalone: true, innerWidth: 844, innerHeight: 390, screenWidth: 390, screenHeight: 844, safeTop: 0 }), 8);
 });
 
+test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', async () => {
+    const prevWin = globalThis.window;
+    const store = new Map();
+    globalThis.window = {
+        localStorage: {
+            getItem: (k) => (store.has(k) ? store.get(k) : null),
+            setItem: (k, v) => { store.set(k, v); },
+        },
+    };
+    try {
+        const { prefs, DEFAULT_SETTINGS } = await import('../src/data/prefs.js?kidnar=1');
+        assert.equal(DEFAULT_SETTINGS.kidNarration, false);
+        assert.equal(prefs.current.kidNarration, false);
+
+        prefs.setKidNarration(true);
+        assert.equal(prefs.current.kidNarration, true);
+        assert.equal(JSON.parse(store.get('chessduck_v2_settings')).kidNarration, true);
+
+        prefs.setKidNarration(false);
+        assert.equal(prefs.current.kidNarration, false);
+    } finally {
+        if (prevWin === undefined) delete globalThis.window;
+        else globalThis.window = prevWin;
+    }
+
+    const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
+    const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
+    assert.match(swSrc, /chessduck-v2\.4\.7-/);
+    assert.match(settingsSrc, /v2\.4\.7/);
+    assert.match(settingsSrc, /Voix en mode enfant/);
+    assert.match(cssSrc, /v2\.4\.7/);
+});
+
+test('v2.4.7: KidMode demoPhases written for oral speech & clean through SpokenFr', async () => {
+    const { demoPhases, KID_LEGEND } = await import('../src/features/kid.js');
+    const { SpokenFr } = await import('../src/core/spoken-fr.js');
+
+    assert.equal(demoPhases(QUEEN).length, 2);
+    assert.equal(demoPhases(PAWN).length, 3);
+    for (const piece of KID_LEGEND) {
+        assert.equal('text' in piece, false, `KID_LEGEND(${piece.name}) should delegate explanation text to demoPhases`);
+        const phases = demoPhases(piece.type);
+        assert.ok(phases.length >= 1, `${piece.name} must have >=1 demo phase`);
+        for (const ph of phases) {
+            assert.ok(typeof ph.say === 'string' && ph.say.length > 0);
+            assert.equal(/[()]/.test(ph.say), false, `Parentheses forbidden in oral kid phase: "${ph.say}"`);
+            assert.equal(/\d/.test(ph.say), false, `Raw digits forbidden in oral kid phase: "${ph.say}"`);
+            const spoken = SpokenFr.text(ph.say);
+            assert.equal(/\*\*|[()]|\d/.test(spoken), false, `Unexpected markup/digits after SpokenFr.text: "${spoken}"`);
+        }
+    }
+});
+
+test('v2.4.6..v2.4.7: KidVoiceController sync, single loop pass, 30s cooldown, piece switch & immediate stop', async () => {
+    const { KidVoiceController, KID_REPEAT_COOLDOWN_MS } = await import('../src/features/kid.js');
+    assert.equal(KID_REPEAT_COOLDOWN_MS, 30_000);
+
+    let enabled = false;
+    let now = 0;
+    const spoken = [];
+    let stops = 0;
+    let waiters = [];
+    const fakeNarrator = {
+        speaking: false,
+        speak(text) {
+            spoken.push(text);
+            this.speaking = true;
+        },
+        stop() {
+            stops += 1;
+            this.speaking = false;
+            const pending = waiters.splice(0);
+            pending.forEach((r) => r());
+        },
+        awaitIdle() {
+            if (!this.speaking) return Promise.resolve({ played: true });
+            return new Promise((resolve) => waiters.push(() => resolve({ played: true })));
+        },
+        finish() {
+            this.speaking = false;
+            const pending = waiters.splice(0);
+            pending.forEach((r) => r());
+        },
+    };
+
+    const ctrl = new KidVoiceController({
+        getEnabled: () => enabled,
+        narrator: fakeNarrator,
+        clock: () => now,
+    });
+
+    // Voix désactivée par défaut : rien n'est dit et l'animation n'attend jamais.
+    assert.equal(ctrl.pieceShown(QUEEN), false);
+    ctrl.say(QUEEN, 'La **Dame** va **tout droit**.');
+    await ctrl.awaitVoice(QUEEN);
+    assert.deepEqual(spoken, []);
+
+    // Voix activée : chaque étape est annoncée au début, et awaitVoice attend la fin de la phrase.
+    enabled = true;
+    assert.equal(ctrl.pieceShown(QUEEN), true);
+    ctrl.say(QUEEN, 'La **Dame** va **tout droit**.');
+    assert.deepEqual(spoken, ['La Dame va tout droit.']);
+    let finished = false;
+    const waitP = ctrl.awaitVoice(QUEEN).then(() => { finished = true; });
+    await Promise.resolve();
+    assert.equal(finished, false);
+    fakeNarrator.finish();
+    await waitP;
+    assert.equal(finished, true);
+
+    // Deuxième étape de la Dame lue au premier tour, puis silence aux tours suivants après voiceDone().
+    ctrl.say(QUEEN, 'Elle va aussi **en diagonale**.');
+    assert.equal(spoken.length, 2);
+    fakeNarrator.finish();
+    await ctrl.awaitVoice(QUEEN);
+    ctrl.voiceDone(QUEEN);
+    ctrl.say(QUEEN, 'La **Dame** va **tout droit**.');
+    assert.equal(spoken.length, 2);
+
+    // Même pièce rouverte avant 30 s : silencieuse ; fermer la fiche coupe la voix immédiatement.
+    ctrl.pieceClosed();
+    now += 10_000;
+    assert.equal(ctrl.pieceShown(QUEEN), false);
+    ctrl.say(QUEEN, 'La **Dame** va **tout droit**.');
+    assert.equal(spoken.length, 2);
+
+    // Une autre pièce est commentée ; ouvrir une troisième pièce pendant qu'elle parle coupe la précédente.
+    assert.equal(ctrl.pieceShown(PAWN), true);
+    ctrl.say(PAWN, 'Le **Pion** avance **tout droit**.');
+    assert.equal(spoken.length, 3);
+    assert.equal(fakeNarrator.speaking, true);
+    const stopsBeforeSwitch = stops;
+    assert.equal(ctrl.pieceShown(ROOK), true);
+    assert.equal(stops, stopsBeforeSwitch + 1);
+    ctrl.say(ROOK, 'La **Tour** va **tout droit**.');
+    assert.equal(spoken.length, 4);
+
+    // Retrait de l'accord parental en cours de lecture : coupe immédiatement.
+    const stopsBeforeToggle = stops;
+    enabled = false;
+    ctrl.onEnabledChanged(false);
+    assert.equal(stops, stopsBeforeToggle + 1);
+    assert.equal(fakeNarrator.speaking, false);
+
+    // Réactivation et délai de calme de 30 s écoulé : la Dame peut être commentée de nouveau.
+    enabled = true;
+    now += 30_000;
+    assert.equal(ctrl.pieceShown(QUEEN), true);
+    ctrl.say(QUEEN, 'La **Dame** va **tout droit**.');
+    assert.equal(spoken.length, 5);
+});
+
+test('v2.4.7: measureEvalBarWidth grows for large font scaling without clipping −9.9 or M12', async () => {
+    const { measureEvalBarWidth } = await import('../src/ui/board.js');
+
+    assert.equal(measureEvalBarWidth({ measureFn: (s) => s.length * 4.5 }), 26);
+    assert.equal(measureEvalBarWidth({ measureFn: (s) => s.length * 8.5 }), Math.ceil(4 * 8.5) + 8);
+    assert.ok(measureEvalBarWidth({ measureFn: (s) => s.length * 10 }) >= 48);
+});
+
+
 

@@ -268,6 +268,7 @@ class ChessDuckApp {
             requestAnimationFrame(() => this.kidFeature?.onActivate());
         } else {
             if (this._wasKid) {
+                this.kidFeature?.onDeactivate?.();
                 this.kidFeature?.reset();
             }
             this.kidShell.classList.add('hidden');

@@ -1,6 +1,7 @@
 import {
     BISHOP, BLACK, GameEnd, KING, KNIGHT, Line, PAWN, QUEEN, ROOK, START_FEN, fileOf, rankOf, sq,
 } from '../core/chess.js';
+import { SpokenFr } from '../core/spoken-fr.js';
 import { prefs } from '../data/prefs.js';
 import { BoardGeometry } from '../ui/board-geometry.js';
 import { ChessBoardView } from '../ui/board.js';
@@ -9,34 +10,88 @@ import { ModuleLayoutView, el } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 import { moveAnim, undoAnim } from '../ui/line-playback.js';
+import { narrator } from '../ui/narrator.js';
 import { KID_PIECE_URLS, pieceStore } from '../ui/pieces.js';
 import { KidColors } from '../ui/theme.js';
 
+export const KID_REPEAT_COOLDOWN_MS = 30_000;
+
+/**
+ * Contrôleur de la voix du mode enfant : réglage parental, une seule lecture par ouverture,
+ * jamais en partie, délai de calme de 30 s par pièce et coupure immédiate à la fermeture.
+ */
+export class KidVoiceController {
+    constructor({ getEnabled, narrator: voiceNarrator, clock = () => Date.now() }) {
+        this._getEnabled = getEnabled;
+        this._narrator = voiceNarrator;
+        this._clock = clock;
+        this._lastPiece = 0;
+        this._lastSpokenAt = 0;
+        this._voiceFor = 0;
+    }
+
+    /**
+     * Fiche d'une pièce ouverte : son premier tour d'animation sera commenté. Rouvrir la même pièce dans les
+     * [KID_REPEAT_COOLDOWN_MS] qui suivent ne relance pas la voix ; une autre pièce coupe la précédente.
+     */
+    pieceShown(type) {
+        if (!this._getEnabled()) {
+            this._voiceFor = 0;
+            return false;
+        }
+        if (this._voiceFor && this._voiceFor !== type) {
+            this._narrator.stop();
+        }
+        const now = this._clock();
+        if (type === this._lastPiece && now - this._lastSpokenAt < KID_REPEAT_COOLDOWN_MS) {
+            this._voiceFor = 0;
+            return false;
+        }
+        this._lastPiece = type;
+        this._lastSpokenAt = now;
+        this._voiceFor = type;
+        return true;
+    }
+
+    /** Phrase d'une étape de l'animation, dite au moment où elle commence (si la fiche est commentée). */
+    say(type, sentence) {
+        if (this._voiceFor === type && this._getEnabled()) {
+            this._narrator.speak(SpokenFr.text(sentence));
+        }
+    }
+
+    /** Attend la fin de la phrase en cours avant l'étape suivante ; sans voix, ne fait rien (rythme inchangé). */
+    async awaitVoice(type) {
+        if (this._voiceFor === type && this._getEnabled()) {
+            await this._narrator.awaitIdle();
+        }
+    }
+
+    /** Premier tour d'animation terminé : les tours suivants sont silencieux. */
+    voiceDone(type) {
+        if (this._voiceFor === type) this._voiceFor = 0;
+    }
+
+    /** Fiche fermée, écran quitté ou application en arrière-plan : la voix se tait aussitôt. */
+    pieceClosed() {
+        const hadVoice = this._voiceFor !== 0 || this._narrator.speaking;
+        this._voiceFor = 0;
+        if (hadVoice) this._narrator.stop();
+    }
+
+    /** Réaction immédiate si le parent désactive la voix dans les réglages. */
+    onEnabledChanged(enabled) {
+        if (!enabled) this.pieceClosed();
+    }
+}
+
 export const KID_LEGEND = [
-    {
-        type: KING, name: 'Roi', bg: '#FFE08A', edge: '#F2B705', ink: '#8A5A00', article: 'Le Roi',
-        text: "Le **Roi** avance d'**une seule case**, dans **toutes les directions**.",
-    },
-    {
-        type: QUEEN, name: 'Dame', bg: '#FFC2D4', edge: '#FF7AA2', ink: '#D6336C', article: 'La Dame',
-        text: "La **Dame** va **tout droit** ou **en diagonale**, aussi loin qu'elle veut.",
-    },
-    {
-        type: ROOK, name: 'Tour', bg: '#BFE6FF', edge: '#4DB5F5', ink: '#1971C2', article: 'La Tour',
-        text: "La **Tour** va **tout droit** : devant, derrière ou sur les côtés, aussi loin qu'elle veut.",
-    },
-    {
-        type: BISHOP, name: 'Fou', bg: '#D9C8FF', edge: '#9B7BFF', ink: '#6741D9', article: 'Le Fou',
-        text: "Le **Fou** glisse **en diagonale**, aussi loin qu'il veut.",
-    },
-    {
-        type: KNIGHT, name: 'Cavalier', bg: '#FFD3A8', edge: '#FF9F43', ink: '#C2410C', article: 'Le Cavalier',
-        text: "Le **Cavalier** saute en forme de **L** : 2 cases tout droit, puis 1 sur le côté. Il peut **sauter par-dessus** les autres pièces !",
-    },
-    {
-        type: PAWN, name: 'Pion', bg: '#C9F2B0', edge: '#6CCB3A', ink: '#237A36', article: 'Le Pion',
-        text: "Le **Pion** avance **tout droit** d'une case (2 cases la première fois). Il mange **en diagonale** !",
-    },
+    { type: KING, name: 'Roi', bg: '#FFE08A', edge: '#F2B705', ink: '#8A5A00', article: 'Le Roi' },
+    { type: QUEEN, name: 'Dame', bg: '#FFC2D4', edge: '#FF7AA2', ink: '#D6336C', article: 'La Dame' },
+    { type: ROOK, name: 'Tour', bg: '#BFE6FF', edge: '#4DB5F5', ink: '#1971C2', article: 'La Tour' },
+    { type: BISHOP, name: 'Fou', bg: '#D9C8FF', edge: '#9B7BFF', ink: '#6741D9', article: 'Le Fou' },
+    { type: KNIGHT, name: 'Cavalier', bg: '#FFD3A8', edge: '#FF9F43', ink: '#C2410C', article: 'Le Cavalier' },
+    { type: PAWN, name: 'Pion', bg: '#C9F2B0', edge: '#6CCB3A', ink: '#237A36', article: 'Le Pion' },
 ];
 
 const STRAIGHT = [[0, 1], [1, 0], [0, -1], [-1, 0]];
@@ -54,38 +109,69 @@ function ray(from, df, dr) {
     return out;
 }
 
-function demoPhases(type) {
+/**
+ * Étapes de démonstration : la phrase qui explique l'étape (**mots importants** en gras, écrite pour
+ * être dite à voix haute), la case de départ, les trajets, les cases à signaler et la pièce à manger.
+ */
+export function demoPhases(type) {
     const home = [3, 3]; // d4
     const rays = (dirs) => dirs.map(([df, dr]) => ray(home, df, dr));
     switch (type) {
         case ROOK: {
             const r = rays(STRAIGHT);
-            return [{ home, paths: r, dots: r.flat(), enemy: null }];
+            return [{
+                say: "La **Tour** va **tout droit** : devant, derrière ou sur les côtés, aussi loin qu'elle veut.",
+                home, paths: r, dots: r.flat(), enemy: null,
+            }];
         }
         case BISHOP: {
             const r = rays(DIAGONAL);
-            return [{ home, paths: r, dots: r.flat(), enemy: null }];
+            return [{
+                say: "Le **Fou** glisse **en diagonale**, aussi loin qu'il veut.",
+                home, paths: r, dots: r.flat(), enemy: null,
+            }];
         }
         case QUEEN:
             return [
-                { home, paths: rays(STRAIGHT.slice(0, 2)), dots: rays(STRAIGHT).flat(), enemy: null },
-                { home, paths: rays([[1, 1], [-1, -1]]), dots: rays(DIAGONAL).flat(), enemy: null },
+                {
+                    say: "La **Dame** va **tout droit**, aussi loin qu'elle veut.",
+                    home, paths: rays(STRAIGHT.slice(0, 2)), dots: rays(STRAIGHT).flat(), enemy: null,
+                },
+                {
+                    say: "Elle va aussi **en diagonale**, aussi loin qu'elle veut.",
+                    home, paths: rays([[1, 1], [-1, -1]]), dots: rays(DIAGONAL).flat(), enemy: null,
+                },
             ];
         case KING: {
             const steps = [...STRAIGHT, ...DIAGONAL].map(([df, dr]) => [home[0] + df, home[1] + dr]);
             const paths = [0, 4, 1, 5, 2, 6, 3, 7].map((i) => [steps[i]]);
-            return [{ home, paths, dots: steps, enemy: null }];
+            return [{
+                say: "Le **Roi** avance d'**une seule case**, dans **toutes les directions**.",
+                home, paths, dots: steps, enemy: null,
+            }];
         }
         case KNIGHT: {
             const jumps = [[1, 2], [2, -1], [-1, -2], [-2, 1], [2, 1], [1, -2], [-2, -1], [-1, 2]]
                 .map(([df, dr]) => [home[0] + df, home[1] + dr]);
-            return [{ home, paths: jumps.slice(0, 4).map((j) => [j]), dots: jumps, enemy: null }];
+            return [{
+                say: "Le **Cavalier** saute en forme de **L** : deux cases tout droit, puis une sur le côté. Il peut **sauter par-dessus** les autres pièces !",
+                home, paths: jumps.slice(0, 4).map((j) => [j]), dots: jumps, enemy: null,
+            }];
         }
         default:
             return [
-                { home: [3, 1], paths: [[[3, 2]]], dots: [[3, 2]], enemy: null },
-                { home: [3, 1], paths: [[[3, 3]]], dots: [[3, 2], [3, 3]], enemy: null },
-                { home: [3, 3], paths: [[[4, 4]]], dots: [[4, 4]], enemy: [4, 4] },
+                {
+                    say: "Le **Pion** avance **tout droit**, d'une seule case.",
+                    home: [3, 1], paths: [[[3, 2]]], dots: [[3, 2]], enemy: null,
+                },
+                {
+                    say: "La première fois qu'il bouge, il peut avancer de **deux cases**.",
+                    home: [3, 1], paths: [[[3, 3]]], dots: [[3, 2], [3, 3]], enemy: null,
+                },
+                {
+                    say: "Et il mange **en diagonale** !",
+                    home: [3, 3], paths: [[[4, 4]]], dots: [[4, 4]], enemy: [4, 4],
+                },
             ];
     }
 }
@@ -135,6 +221,11 @@ export class KidFeature {
         this._demoSnapshot = null;
         this._quitBackdrop = null;
         this._destroyed = false;
+        this._lastKidNarration = prefs.current.kidNarration;
+        this._voice = new KidVoiceController({
+            getEnabled: () => prefs.current.kidNarration,
+            narrator,
+        });
 
         this.state = {
             line: new Line(START_FEN),
@@ -152,6 +243,27 @@ export class KidFeature {
         this._unbindPieceLoad = pieceStore.onLoad(() => {
             if (this._demoCanvas) this._drawDemo();
         });
+        this._unsubPrefs = prefs.subscribe((st) => {
+            if (this._destroyed) return;
+            if (st.kidNarration !== this._lastKidNarration) {
+                this._lastKidNarration = st.kidNarration;
+                if (st.kidNarration) narrator.prepare();
+                else this._voice.onEnabledChanged(false);
+            }
+        });
+        this._onVisibilityChange = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                this._voice.pieceClosed();
+            }
+        };
+        this._onPageHide = () => this._voice.pieceClosed();
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', this._onVisibilityChange);
+        }
+        if (typeof window !== 'undefined') {
+            window.addEventListener('pagehide', this._onPageHide);
+        }
+        if (prefs.current.kidNarration) narrator.prepare();
         pieceStore.preloadSet(true).catch(() => {});
         this._render();
     }
@@ -159,8 +271,16 @@ export class KidFeature {
     destroy() {
         this._destroyed = true;
         this._stopDemo();
+        this._voice.pieceClosed();
         this._closeQuitDialog();
         if (this._blockedTimer) clearTimeout(this._blockedTimer);
+        if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', this._onVisibilityChange);
+        }
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('pagehide', this._onPageHide);
+        }
+        this._unsubPrefs?.();
         this._unbindPieceLoad?.();
         this.board.destroy();
         this.capturedBar.destroy();
@@ -176,6 +296,7 @@ export class KidFeature {
     }
 
     onActivate() {
+        if (prefs.current.kidNarration) narrator.prepare();
         if (this._demoType > 0 && this.demoLayout) {
             this.demoLayout.relayout();
             this._syncDemoCanvasSize();
@@ -185,6 +306,10 @@ export class KidFeature {
             this.board._syncCanvasSize();
             this.board.draw();
         }
+    }
+
+    onDeactivate() {
+        this._voice.pieceClosed();
     }
 
     get position() {
@@ -468,6 +593,7 @@ export class KidFeature {
         const piece = KID_LEGEND.find((p) => p.type === type);
         if (!piece) return;
         this._demoType = type;
+        const phases = demoPhases(piece.type);
 
         this.demoLayout = new ModuleLayoutView({ bottomMin: 190, adaptive: false });
 
@@ -502,7 +628,7 @@ export class KidFeature {
         box.style.borderColor = piece.edge;
         box.style.color = piece.ink;
         const txtEl = el('p', 'kid-demo-text');
-        appendBoldText(txtEl, piece.text);
+        appendBoldText(txtEl, phases.map((ph) => ph.say).join(' '));
         box.appendChild(txtEl);
         const backBtn = kidButton({
             label: 'Revenir à la partie',
@@ -520,12 +646,13 @@ export class KidFeature {
         this.mainWrap.replaceChildren(this.demoLayout.el);
         this.demoLayout.relayout();
         this._syncDemoCanvasSize();
-        this._runDemoLoop(piece);
+        this._runDemoLoop(piece, phases);
     }
 
     _stopDemo() {
         this._demoToken += 1;
         this._demoType = 0;
+        this._voice.pieceClosed();
         if (this._demoTimer) { clearTimeout(this._demoTimer); this._demoTimer = null; }
         if (this._demoRaf) { cancelAnimationFrame(this._demoRaf); this._demoRaf = 0; }
         this._demoRo?.disconnect();
@@ -553,9 +680,8 @@ export class KidFeature {
         }
     }
 
-    _runDemoLoop(piece) {
+    _runDemoLoop(piece, phases = demoPhases(piece.type)) {
         const token = ++this._demoToken;
-        const phases = demoPhases(piece.type);
         const wait = (ms) => new Promise((resolve) => {
             if (token !== this._demoToken || this._destroyed) { resolve(false); return; }
             this._demoTimer = setTimeout(() => {
@@ -580,9 +706,13 @@ export class KidFeature {
             this._demoRaf = requestAnimationFrame(step);
         });
 
+        this._voice.pieceShown(piece.type);
+
         (async () => {
             while (token === this._demoToken && !this._destroyed) {
                 for (const ph of phases) {
+                    if (token !== this._demoToken || this._destroyed) return;
+                    this._voice.say(piece.type, ph.say);
                     for (const path of ph.paths) {
                         if (token !== this._demoToken || this._destroyed) return;
                         this._demoSnapshot = {
@@ -613,7 +743,11 @@ export class KidFeature {
                         }
                         if (!(await wait(650))) return;
                     }
+                    // La phrase de cette étape se termine avant de passer à la suivante : voix et image restent synchrones.
+                    await this._voice.awaitVoice(piece.type);
+                    if (token !== this._demoToken || this._destroyed) return;
                 }
+                this._voice.voiceDone(piece.type);
             }
         })();
     }

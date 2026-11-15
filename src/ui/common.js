@@ -509,6 +509,7 @@ export class ModuleLayoutView {
         this.panelPane.append(this.topSlot, this.bottomSlot);
         this.el.append(this.boardPane, this.panelPane);
 
+        this._evalActive = false;
         this._evalPad = 0;
         this._destroyed = false;
         this._ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.relayout()) : null;
@@ -527,8 +528,18 @@ export class ModuleLayoutView {
     }
 
     setEvalActive(active) {
-        this._evalPad = active ? 30 : 0;
+        this._evalActive = Boolean(active);
+        this._evalPad = this._resolveEvalPad();
         this.relayout();
+    }
+
+    _resolveEvalPad() {
+        if (!this._evalActive) return 0;
+        const evalEl = this.boardHost.querySelector('.eval-bar');
+        if (evalEl && typeof evalEl._measureSpace === 'function') {
+            return evalEl._measureSpace();
+        }
+        return 32;
     }
 
     resetReserve() {
@@ -623,6 +634,7 @@ export class ModuleLayoutView {
         const w = this.el.clientWidth;
         const h = this.el.clientHeight;
         if (!w || !h) return;
+        this._evalPad = this._resolveEvalPad();
         const twoPane = isTwoPane(window.innerWidth, window.innerHeight);
         this.el.classList.toggle('is-two-pane', twoPane);
 

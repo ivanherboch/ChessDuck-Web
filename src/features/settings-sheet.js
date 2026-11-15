@@ -47,6 +47,37 @@ function createSwitchRow({ title, description, checked, onChange }) {
     };
 }
 
+function createVoiceSwitchRow({ title, description, checked, onToggle }) {
+    const row = createSwitchRow({
+        title,
+        description,
+        checked,
+        onChange: (v) => {
+            if (v) {
+                narrator.prepare();
+                narrator.unlock(true);
+            } else {
+                narrator.stop();
+            }
+            onToggle(v);
+        },
+    });
+    return {
+        ...row,
+        syncVoice(value, voiceAvail) {
+            if (voiceAvail === false) {
+                row.setChecked(false);
+                row.setEnabled(false);
+                row.setDescription("La synthèse vocale n'est pas disponible sur ce navigateur.");
+            } else {
+                row.setChecked(value);
+                row.setEnabled(true);
+                row.setDescription(description);
+            }
+        },
+    };
+}
+
 function createPseudoField({ label, initial, fallback, onSave }) {
     const wrap = el('div', 'pseudo-field');
     const lbl = el('label', 'pseudo-field-label', label);
@@ -213,7 +244,13 @@ export function openSettingsSheet() {
         'muted-small mt-6',
         'Un écran joyeux et coloré pour jouer à deux avec un enfant : grand échiquier, cavalier en forme de girafe, animations qui montrent comment chaque pièce bouge, sans ordinateur ni historique.',
     );
-    b.append(kidBtn, kidDesc);
+    const kidNarrationRow = createVoiceSwitchRow({
+        title: 'Voix en mode enfant',
+        description: "Lit chaque façon de bouger au moment où l'enfant la voit, une seule fois. Rien n'est lu pendant les parties.",
+        checked: prefs.current.kidNarration,
+        onToggle: (v) => prefs.setKidNarration(v),
+    });
+    b.append(kidBtn, kidDesc, kidNarrationRow.el);
 
     // ---- Apparence ----
     b.appendChild(el('h3', 'sheet-section-title', 'Apparence'));
@@ -256,19 +293,11 @@ export function openSettingsSheet() {
         checked: prefs.current.haptics,
         onChange: (v) => prefs.setHaptics(v),
     });
-    const narrationRow = createSwitchRow({
+    const narrationRow = createVoiceSwitchRow({
         title: 'Lecture vocale des leçons',
         description: "Lit à voix haute les coups et les explications du mode Guidé de l'Académie.",
         checked: prefs.current.narration,
-        onChange: (v) => {
-            if (v) {
-                narrator.prepare();
-                narrator.unlock(true);
-            } else {
-                narrator.stop();
-            }
-            prefs.setNarration(v);
-        },
+        onToggle: (v) => prefs.setNarration(v),
     });
     b.append(soundRow.el, hapticsRow.el, narrationRow.el);
 
@@ -311,7 +340,7 @@ export function openSettingsSheet() {
         'muted-small',
         'ChessDuck fonctionne 100 % hors-ligne. Moteur : Stockfish 19 Lite WASM (GPLv3). Problèmes : base ouverte Lichess (CC0). Pièces : série classique de Cburnett et pièce féerique Girafe, Wikimedia Commons (CC BY-SA 3.0). Icônes : Material Icons (Apache 2.0). Police du mode enfant : Fredoka (OFL).',
     );
-    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.4.5');
+    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v2.4.7');
     b.append(aboutText, copyright);
 
     function sync(st) {
@@ -322,15 +351,8 @@ export function openSettingsSheet() {
         soundRow.setChecked(st.sound);
         hapticsRow.setChecked(st.haptics);
 
-        if (voiceAvail === false) {
-            narrationRow.setChecked(false);
-            narrationRow.setEnabled(false);
-            narrationRow.setDescription("La synthèse vocale n'est pas disponible sur ce navigateur.");
-        } else {
-            narrationRow.setChecked(st.narration);
-            narrationRow.setEnabled(true);
-            narrationRow.setDescription("Lit à voix haute les coups et les explications du mode Guidé de l'Académie.");
-        }
+        kidNarrationRow.syncVoice(st.kidNarration, voiceAvail);
+        narrationRow.syncVoice(st.narration, voiceAvail);
 
         pseudo1.syncExternal(st.pseudo);
         pseudo2.syncExternal(st.pseudo2);

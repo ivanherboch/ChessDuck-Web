@@ -621,6 +621,38 @@ export class ChessBoardView {
     }
 }
 
+const EVAL_WIDEST = ['−9.9', '+9.9', '+10', 'M12'];
+let evalMeasureCtx = null;
+
+/**
+ * Largeur de la jauge : fixe (l'échiquier ne saute pas quand le score change) et assez large pour le score
+ * le plus long, quelle que soit la taille de police du navigateur/système.
+ */
+export function measureEvalBarWidth({
+    font = '800 9px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    measureFn = null,
+    minWidth = 26,
+    extraPad = 8,
+} = {}) {
+    let measure = measureFn;
+    if (!measure && typeof document !== 'undefined') {
+        if (!evalMeasureCtx) {
+            const c = document.createElement('canvas');
+            evalMeasureCtx = c.getContext?.('2d') || null;
+        }
+        if (evalMeasureCtx) {
+            evalMeasureCtx.font = font;
+            measure = (s) => evalMeasureCtx.measureText(s).width;
+        }
+    }
+    if (!measure) return minWidth;
+    let widest = 0;
+    for (const sample of EVAL_WIDEST) {
+        widest = Math.max(widest, measure(sample));
+    }
+    return Math.max(minWidth, Math.ceil(widest) + extraPad);
+}
+
 /** Jauge latérale d'évaluation animée (350 ms). */
 export class EvalBarView {
     constructor() {
@@ -634,9 +666,32 @@ export class EvalBarView {
         this.label = document.createElement('span');
         this.label.className = 'eval-bar-label';
         this.el.append(this.fill, this.tick, this.label);
+        this.el._measureSpace = () => this.measureSpace();
+    }
+
+    /** Met à jour `--eval-w` selon la police réelle et renvoie l'espace total occupé à gauche de l'échiquier. */
+    measureSpace() {
+        let font;
+        let gap = 6;
+        if (typeof getComputedStyle === 'function') {
+            if (this.label.isConnected) {
+                const lcs = getComputedStyle(this.label);
+                font = lcs.font || `${lcs.fontWeight || '800'} ${lcs.fontSize || '9px'} ${lcs.fontFamily || 'system-ui, sans-serif'}`;
+            }
+            const parent = this.el.parentElement;
+            if (parent && parent.isConnected) {
+                const pcs = getComputedStyle(parent);
+                const parsedGap = parseFloat(pcs.columnGap || pcs.gap);
+                if (Number.isFinite(parsedGap) && parsedGap >= 0) gap = parsedGap;
+            }
+        }
+        const barWidth = measureEvalBarWidth({ font });
+        this.el.style.setProperty('--eval-w', `${barWidth}px`);
+        return barWidth + gap;
     }
 
     update(evalWhite, flipped) {
+        this.measureSpace();
         const share = Math.max(0.03, Math.min(0.97, winPercent(evalWhite) / 100));
         const pct = (share * 100).toFixed(2) + '%';
         this.fill.style.height = pct;
