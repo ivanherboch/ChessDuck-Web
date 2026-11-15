@@ -18,7 +18,7 @@ const LEVEL_SHORT = ['Tous', 'Bases', 'Prises', 'Roques'];
 export class NotationFeature {
     constructor() {
         this.el = el('div', 'feature-root');
-        this.layout = new ModuleLayoutView({ bottomMin: 292 });
+        this.layout = new ModuleLayoutView({ bottomMin: 298 });
         this.board = new ChessBoardView();
         this.feedbackCard = new FeedbackCardView();
         this.loadingEl = loadingState("Préparation de l'exercice…");

@@ -1,4 +1,4 @@
-/* ChessDuck v2.4.7 — Ardoise & Or + Mode Enfant (Fredoka) */
+/* ChessDuck v2.4.8 — Ardoise & Or + Mode Enfant (Fredoka) */
 
 @font-face {
     font-family: 'Fredoka';
@@ -1570,7 +1570,7 @@ button.move-strip-item {
 .notation-input-box {
     flex: 1 1 0%;
     min-width: 0;
-    height: 44px;
+    height: 48px;
     border-radius: 12px;
     background: var(--surface);
     border: 1px solid var(--outline-strong);
@@ -1615,9 +1615,9 @@ button.move-strip-item {
 }
 
 .notation-bs-btn {
-    width: 44px;
-    height: 44px;
-    flex: 0 0 44px;
+    width: 48px;
+    height: 48px;
+    flex: 0 0 48px;
     border-radius: 12px;
     border: none;
     background: var(--surface-hi);
@@ -1635,7 +1635,7 @@ button.move-strip-item {
 }
 
 .notation-validate-btn {
-    min-height: 44px;
+    min-height: 48px;
     padding: 0 14px;
 }
 
@@ -1644,6 +1644,7 @@ button.move-strip-item {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    padding: 2px 0;
     width: 100%;
 }
 
@@ -1653,9 +1654,13 @@ button.move-strip-item {
     width: 100%;
 }
 
+.fide-row.fide-row-compact {
+    gap: 3px;
+}
+
 .fide-key {
     min-width: 0;
-    height: 36px;
+    height: 44px;
     border-radius: 10px;
     border: none;
     background: var(--surface-hi);
@@ -1681,17 +1686,19 @@ button.move-strip-item {
 }
 
 .fide-key.is-piece {
-    height: 46px;
+    height: 52px;
 }
 
 .fide-key-main {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
+    line-height: 1.15;
     color: inherit;
 }
 
 .fide-key.is-piece .fide-key-main {
     font-size: 16px;
+    line-height: 19px;
 }
 
 .fide-key.is-piece:not(:disabled) .fide-key-main {
@@ -1699,14 +1706,20 @@ button.move-strip-item {
 }
 
 .fide-key-sub {
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 500;
+    line-height: 12px;
     color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .fide-key-sub2 {
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 500;
+    line-height: 12px;
     color: inherit;
     white-space: nowrap;
     overflow: hidden;
@@ -3102,22 +3115,13 @@ button.move-strip-item {
         padding: 4px 5px;
         gap: 4px;
     }
-    .notation-bs-btn {
-        width: 40px;
-        height: 42px;
-        flex-basis: 40px;
-    }
     .notation-validate-btn {
         padding: 0 10px;
     }
-    .fide-key.is-piece {
-        height: 41px;
-    }
-    .fide-key {
-        height: 31px;
-    }
+    .fide-key-sub,
     .fide-key-sub2 {
-        font-size: 8.5px;
+        font-size: 9px;
+        line-height: 11px;
     }
     .kid-legend-row {
         gap: 3px;
@@ -3131,6 +3135,13 @@ button.move-strip-item {
     }
     .kid-nav-step {
         flex: 0 0 54px;
+    }
+}
+
+@media (max-width: 350px) {
+    .notation-bs-btn {
+        width: 42px;
+        flex-basis: 42px;
     }
 }
 
@@ -3162,12 +3173,22 @@ button.move-strip-item {
     }
     .fide-kb {
         gap: 3px;
+        padding: 0;
     }
     .fide-row {
         gap: 3px;
     }
     .fide-key.is-piece {
         height: 41px;
+    }
+    .fide-key.is-piece .fide-key-main {
+        font-size: 15px;
+        line-height: 16px;
+    }
+    .fide-key-sub,
+    .fide-key-sub2 {
+        font-size: 9px;
+        line-height: 10px;
     }
     .fide-key {
         height: 31px;
@@ -3176,6 +3197,8 @@ button.move-strip-item {
         height: 40px;
     }
     .notation-bs-btn {
+        width: 40px;
+        flex-basis: 40px;
         height: 40px;
     }
     .notation-validate-btn {

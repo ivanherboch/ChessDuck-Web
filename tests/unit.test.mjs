@@ -1240,13 +1240,29 @@ test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', 
         else globalThis.window = prevWin;
     }
 
+    const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
+    assert.match(settingsSrc, /Voix en mode enfant/);
+});
+
+test('v2.4.8: version bump & Notation FIDE keyboard WCAG target dimensions', async () => {
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
     const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
-    assert.match(swSrc, /chessduck-v2\.4\.7-/);
-    assert.match(settingsSrc, /v2\.4\.7/);
-    assert.match(settingsSrc, /Voix en mode enfant/);
-    assert.match(cssSrc, /v2\.4\.7/);
+    const notationSrc = fs.readFileSync(path.join(ROOT, 'src/features/notation.js'), 'utf8');
+
+    assert.match(swSrc, /chessduck-v2\.4\.8-/);
+    assert.match(settingsSrc, /v2\.4\.8/);
+    assert.match(cssSrc, /v2\.4\.8/);
+    assert.match(notationSrc, /bottomMin:\s*298/);
+
+    assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*48px/);
+    assert.match(cssSrc, /\.notation-bs-btn\s*\{[^}]*width:\s*48px;[^}]*height:\s*48px/);
+    assert.match(cssSrc, /\.notation-validate-btn\s*\{[^}]*min-height:\s*48px/);
+    assert.match(cssSrc, /\.fide-row\.fide-row-compact\s*\{[^}]*gap:\s*3px/);
+    assert.match(cssSrc, /\.fide-key\s*\{[^}]*height:\s*44px/);
+    assert.match(cssSrc, /\.fide-key\.is-piece\s*\{[^}]*height:\s*52px/);
+    assert.match(cssSrc, /\.fide-key\.is-piece \.fide-key-main\s*\{[^}]*line-height:\s*19px/);
+    assert.match(cssSrc, /\.fide-key-sub,\s*[\s\S]*line-height:\s*12px|\.fide-key-sub\s*\{[^}]*line-height:\s*12px/);
 });
 
 test('v2.4.7: KidMode demoPhases written for oral speech & clean through SpokenFr', async () => {
