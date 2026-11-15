@@ -60,6 +60,7 @@ class ChessDuckApp {
         this._wasKid = prefs.current.kidMode;
         this._palette = resolvePalette(prefs.current);
 
+        this._syncViewportMetrics();
         this._buildShell();
         this._syncLayoutMode();
         if (!prefs.current.kidMode) {
@@ -75,13 +76,35 @@ class ChessDuckApp {
         this._mq?.addEventListener?.('change', this._onMediaChange);
 
         this._onResize = () => {
+            this._syncViewportMetrics();
             this._syncLayoutMode();
             const cur = prefs.current.kidMode ? this.kidFeature : this.features[this.activeTab];
             cur?.onActivate?.();
         };
+        this._onOrientationChange = () => {
+            this._onResize();
+            requestAnimationFrame(() => this._onResize());
+        };
         window.addEventListener('resize', this._onResize);
+        window.addEventListener('orientationchange', this._onOrientationChange);
+        window.visualViewport?.addEventListener('resize', this._onResize);
 
         db.initUserState().catch(() => {});
+    }
+
+    _syncViewportMetrics() {
+        const ae = typeof document !== 'undefined' ? document.activeElement : null;
+        const editing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+        if (editing) return;
+        const vv = window.visualViewport;
+        let h = window.innerHeight;
+        if (vv && vv.height > 0) {
+            const scale = vv.scale && vv.scale > 0 ? vv.scale : 1;
+            h = Math.min(h, Math.round(vv.height * scale));
+        }
+        if (h > 0) {
+            document.documentElement.style.setProperty('--app-h', `${h}px`);
+        }
     }
 
     _buildShell() {

@@ -2,10 +2,13 @@
  * Synthèse vocale Web (Web Speech API) pour la lecture à voix haute des leçons de l'Académie.
  * Optimisée pour iPhone (iOS Safari / PWA), Android (Chrome / WebView) et navigateurs de bureau.
  */
-const MAX_CHUNK_CHARS = 180;
-const START_GRACE_MS = 2200;
+const MAX_CHUNK_CHARS = 140;
+const START_GRACE_MS = 2400;
+const VOICE_FALLBACK_MS = 950;
+const PENDING_FALLBACK_MS = 1600;
 const PENDING_STALL_MS = 7000;
 const CANCEL_RETRY_MS = 160;
+const POST_CANCEL_DELAY_MS = 80;
 const POLL_INTERVAL_MS = 200;
 const IDLE_POLLS_REQUIRED = 3;
 
@@ -17,9 +20,12 @@ export class WebNarrator {
         this._speakSubs = new Set();
         this._seq = 0;
         this._voice = null;
+        this._altVoice = null;
         this._utterances = [];
         this._unlockUtterance = null;
         this._pollTimer = null;
+        this._deferTimer = null;
+        this._lastCancelAt = 0;
         this._unlocked = false;
         this._gestureArmed = false;
         this._lastResult = { played: false, started: false, durationMs: 0, elapsedMs: 0 };
@@ -75,8 +81,30 @@ export class WebNarrator {
         return window.speechSynthesis;
     }
 
+    _isAppleWebKit() {
+        if (typeof navigator === 'undefined') return false;
+        const ua = navigator.userAgent || '';
+        const platform = navigator.platform || '';
+        const touchPts = navigator.maxTouchPoints || 0;
+        if (/iPad|iPhone|iPod/i.test(ua) || (platform === 'MacIntel' && touchPts > 1)) {
+            return true;
+        }
+        return /Macintosh/i.test(ua)
+            && /Safari/i.test(ua)
+            && !/Chrome|Chromium|Edg|OPR|Firefox|SamsungBrowser|Android/i.test(ua);
+    }
+
+    _isAndroid() {
+        if (typeof navigator === 'undefined') return false;
+        return /Android/i.test(navigator.userAgent || '');
+    }
+
+    _prefersLangOnly() {
+        return this._isAndroid();
+    }
+
     _armGestureUnlock() {
-        if (typeof window === 'undefined' || this._gestureArmed) return;
+        if (typeof window === 'undefined' || this._gestureArmed || !this._isAppleWebKit()) return;
         this._gestureArmed = true;
         window.addEventListener('click', this._onGesture, { passive: true });
         window.addEventListener('keydown', this._onGesture, { passive: true });
@@ -127,7 +155,7 @@ export class WebNarrator {
         window.addEventListener('pagehide', resetAudioSession);
     }
 
-    /** Déverrouille l'audio WebKit (iOS Safari) de façon inaudible dans le fil d'un geste utilisateur. */
+    /** Déverrouille l'audio WebKit (iOS/macOS Safari) sans polluer la file Chrome/Android avec un blanc. */
     unlock(force = false) {
         if (!force && this._unlocked) {
             this._disarmGestureUnlock();
@@ -136,6 +164,16 @@ export class WebNarrator {
         if (this._speaking || this._available === false) return false;
         const synth = this._synth();
         if (!synth) return false;
+
+        if (!this._isAppleWebKit()) {
+            try {
+                if (synth.paused) synth.resume();
+            } catch { /* ignore */ }
+            this._unlocked = true;
+            this._disarmGestureUnlock();
+            return false;
+        }
+
         try {
             if (synth.speaking || synth.pending) return false;
             // Une chaîne non vide (' ') est nécessaire sur iOS Safari pour activer AVSpeechSynthesizer.
@@ -174,11 +212,13 @@ export class WebNarrator {
         const frVoices = voices.filter((v) => v && typeof v.lang === 'string' && /^fr([-_]|$)/i.test(v.lang));
         if (frVoices.length > 0) {
             frVoices.sort((a, b) => this._scoreVoice(b) - this._scoreVoice(a));
-            const best = frVoices[0];
             const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-            this._voice = offline && best.localService === false ? null : best;
+            const usable = offline ? frVoices.filter((v) => v.localService !== false) : frVoices;
+            this._voice = usable[0] || null;
+            this._altVoice = usable[1] || null;
         } else {
             this._voice = null;
+            this._altVoice = null;
         }
         // Sur iOS Safari et Android Chrome, getVoices() peut rester vide avant la première lecture ;
         // utter.lang = 'fr-FR' sollicite alors directement la synthèse système.
@@ -210,7 +250,7 @@ export class WebNarrator {
         return score;
     }
 
-    /** Découpe un texte long en segments naturels (< 180 car.) pour éviter la coupure à 15 s sur Chrome. */
+    /** Découpe un texte long en segments naturels (< 140 car.) pour éviter la coupure à 15 s sur Chrome. */
     _splitChunks(text, maxLen = MAX_CHUNK_CHARS) {
         const clean = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
         if (!clean) return [];
@@ -298,18 +338,37 @@ export class WebNarrator {
         this._lastResult = { played: false, started: false, durationMs: 0, elapsedMs: 0 };
         this._setSpeaking(true);
 
+        const appleWebKit = this._isAppleWebKit();
         const wasBusy = Boolean(synth.speaking || synth.pending);
         if (wasBusy) {
+            this._lastCancelAt = requestedAt;
             try { synth.cancel(); } catch { /* ignore */ }
         }
+        const sinceCancel = requestedAt - this._lastCancelAt;
 
+        const candidates = [];
+        const addCandidate = (c) => {
+            if (!candidates.includes(c)) candidates.push(c);
+        };
+        if (this._prefersLangOnly()) {
+            addCandidate(null);
+            addCandidate(this._voice);
+            addCandidate(this._altVoice);
+        } else {
+            addCandidate(this._voice);
+            addCandidate(this._altVoice);
+            addCandidate(null);
+        }
         const maxMs = Math.max(15000, Math.min(75000, 5000 + clean.length * 160));
         let attempt = 0;
         let started = false;
         let sawSpeaking = false;
         let synthStartedAt = 0;
+        let chunkIdx = 0;
+        let chunkFinishedCount = 0;
+        let erroredCount = 0;
         let retriedCancel = false;
-        let retriedWithoutVoice = false;
+        let candidateIdx = 0;
 
         const finish = (played) => {
             if (id !== this._seq) return;
@@ -326,31 +385,69 @@ export class WebNarrator {
             this._setSpeaking(false);
         };
 
-        const launch = (useVoice) => {
+        const scheduleLaunch = (voiceCandidate, delayMs) => {
+            if (id !== this._seq) return;
+            this._clearTimers();
+            if (delayMs > 0 && !appleWebKit) {
+                this._deferTimer = setTimeout(() => {
+                    this._deferTimer = null;
+                    launch(voiceCandidate);
+                }, delayMs);
+            } else {
+                launch(voiceCandidate);
+            }
+        };
+
+        const retryAlternateVoice = () => {
+            if (id !== this._seq || candidateIdx + 1 >= candidates.length) return false;
+            candidateIdx += 1;
+            const altVoice = candidates[candidateIdx];
+            attempt += 1;
+            chunkIdx = 0;
+            chunkFinishedCount = 0;
+            erroredCount = 0;
+            try {
+                if (synth.speaking || synth.pending) {
+                    this._lastCancelAt = Date.now();
+                    synth.cancel();
+                }
+            } catch { /* ignore */ }
+            scheduleLaunch(altVoice, POST_CANCEL_DELAY_MS);
+            return true;
+        };
+
+        const launch = (voiceCandidate) => {
             if (id !== this._seq) return;
             const myAttempt = ++attempt;
             this._clearTimers();
 
             try {
-                if (synth.paused && synth.speaking) synth.resume();
+                if (synth.paused) synth.resume();
             } catch { /* ignore */ }
 
             const launchAt = Date.now();
-            let endedCount = 0;
-            let erroredCount = 0;
             let idlePolls = 0;
-            const total = chunks.length;
 
-            const queue = chunks.map((chunk) => {
-                const u = new window.SpeechSynthesisUtterance(chunk);
-                if (useVoice && this._voice) {
-                    try { u.voice = this._voice; } catch { /* ignore */ }
-                    u.lang = (this._voice.lang || 'fr-FR').replace('_', '-');
+            const speakCurrentChunk = () => {
+                if (id !== this._seq || myAttempt !== attempt) return;
+                if (chunkIdx >= chunks.length) {
+                    const elapsedSinceLaunch = Date.now() - launchAt;
+                    const genuinelySpoken = started || sawSpeaking || (erroredCount === 0 && elapsedSinceLaunch >= 250);
+                    finish(genuinelySpoken);
+                    return;
+                }
+
+                const u = new window.SpeechSynthesisUtterance(chunks[chunkIdx]);
+                if (voiceCandidate) {
+                    try { u.voice = voiceCandidate; } catch { /* ignore */ }
+                    u.lang = (voiceCandidate.lang || 'fr-FR').replace('_', '-');
                 } else {
                     u.lang = 'fr-FR';
                 }
                 u.rate = 1.0;
                 u.pitch = 1.0;
+
+                let chunkDone = false;
 
                 const markStarted = () => {
                     if (id !== this._seq || myAttempt !== attempt) return;
@@ -364,9 +461,14 @@ export class WebNarrator {
                 u.onboundary = markStarted;
 
                 u.onend = () => {
-                    if (id !== this._seq || myAttempt !== attempt) return;
-                    endedCount += 1;
-                    if (endedCount + erroredCount >= total) {
+                    if (id !== this._seq || myAttempt !== attempt || chunkDone) return;
+                    chunkDone = true;
+                    chunkFinishedCount += 1;
+                    idlePolls = 0;
+                    if (chunkIdx + 1 < chunks.length) {
+                        chunkIdx += 1;
+                        speakCurrentChunk();
+                    } else {
                         const elapsedSinceLaunch = Date.now() - launchAt;
                         const genuinelySpoken = started || sawSpeaking || (erroredCount === 0 && elapsedSinceLaunch >= 250);
                         finish(genuinelySpoken);
@@ -374,44 +476,35 @@ export class WebNarrator {
                 };
 
                 u.onerror = () => {
-                    if (id !== this._seq || myAttempt !== attempt) return;
-                    // Certaines voix iOS/Android échouent quand u.voice est forcé : on retente sans voix explicite.
-                    if (useVoice && this._voice && !retriedWithoutVoice && !started && !sawSpeaking && endedCount === 0 && erroredCount === 0) {
-                        retriedWithoutVoice = true;
-                        attempt += 1;
-                        try {
-                            if (synth.speaking || synth.pending) synth.cancel();
-                        } catch { /* ignore */ }
-                        launch(false);
+                    if (id !== this._seq || myAttempt !== attempt || chunkDone) return;
+                    chunkDone = true;
+                    // En cas d'échec avant démarrage, basculer entre u.voice explicite, voix alternative ou u.lang seul.
+                    if (!started && !sawSpeaking && chunkFinishedCount === 0 && erroredCount === 0 && retryAlternateVoice(voiceCandidate)) {
                         return;
                     }
                     erroredCount += 1;
-                    if (endedCount + erroredCount >= total) {
+                    if (chunkIdx + 1 < chunks.length) {
+                        chunkIdx += 1;
+                        speakCurrentChunk();
+                    } else {
                         finish(started || sawSpeaking);
                     }
                 };
 
-                return u;
-            });
+                // Conserver une référence forte pour éviter le ramasse-miettes sur mobile/Chrome.
+                this._utterances = [u];
 
-            // Conserver toutes les utterances référencées pour éviter le ramasse-miettes sur mobile/Chrome.
-            this._utterances = queue;
-
-            try {
-                for (const u of queue) {
-                    if (id !== this._seq || myAttempt !== attempt) return;
+                try {
                     synth.speak(u);
+                    if (synth.paused) synth.resume();
+                } catch {
+                    if (id !== this._seq || myAttempt !== attempt) return;
+                    if (!started && !sawSpeaking && retryAlternateVoice(voiceCandidate)) return;
+                    finish(false);
                 }
-            } catch {
-                if (id !== this._seq || myAttempt !== attempt) return;
-                if (useVoice && this._voice && !retriedWithoutVoice && !started && !sawSpeaking) {
-                    retriedWithoutVoice = true;
-                    launch(false);
-                    return;
-                }
-                finish(false);
-                return;
-            }
+            };
+
+            speakCurrentChunk();
 
             this._pollTimer = setInterval(() => {
                 if (id !== this._seq || myAttempt !== attempt) {
@@ -428,12 +521,10 @@ export class WebNarrator {
 
                 let isSpeaking = false;
                 let isPending = false;
-                let isPaused = false;
                 try {
                     isSpeaking = Boolean(synth.speaking);
                     isPending = Boolean(synth.pending);
-                    isPaused = Boolean(synth.paused);
-                    if (isPaused && isSpeaking) synth.resume();
+                    if (synth.paused) synth.resume();
                 } catch {
                     finish(started || sawSpeaking);
                     return;
@@ -448,42 +539,57 @@ export class WebNarrator {
 
                 if (isPending) {
                     idlePolls = 0;
-                    if (!started && !sawSpeaking && elapsed > PENDING_STALL_MS) {
-                        if (useVoice && this._voice && !retriedWithoutVoice) {
-                            retriedWithoutVoice = true;
-                            try { synth.cancel(); } catch { /* ignore */ }
-                            launch(false);
+                    if (!started && !sawSpeaking) {
+                        if (elapsed >= PENDING_FALLBACK_MS && retryAlternateVoice(voiceCandidate)) {
                             return;
                         }
-                        finish(false);
+                        if (elapsed > PENDING_STALL_MS) {
+                            finish(false);
+                        }
                     }
                     return;
                 }
 
                 // Safari < 27 : cancel() peut supprimer asynchrone­ment la phrase qui vient d'être mise en file.
-                if (wasBusy && !retriedCancel && !started && !sawSpeaking && endedCount === 0 && erroredCount === 0 && elapsed >= CANCEL_RETRY_MS) {
+                if (appleWebKit && wasBusy && !retriedCancel && !started && !sawSpeaking && chunkFinishedCount === 0 && erroredCount === 0 && elapsed >= CANCEL_RETRY_MS) {
                     retriedCancel = true;
-                    launch(useVoice);
+                    launch(voiceCandidate);
                     return;
                 }
 
+                // Sur Chrome Desktop/Android, une voix silencieusement bloquée (!speaking && !pending) doit retenter le mode alternatif.
                 if (!started && !sawSpeaking) {
-                    if (elapsed >= START_GRACE_MS) {
+                    if (elapsed >= VOICE_FALLBACK_MS && retryAlternateVoice()) {
+                        return;
+                    }
+                    const graceMs = candidateIdx === 0 ? START_GRACE_MS : 1300;
+                    if (elapsed >= graceMs) {
                         finish(false);
                     }
                     return;
                 }
 
-                // Déjà démarré puis silence prolongé (onend parfois omis sur iOS/Android en file multi-segments).
+                // Déjà démarré puis silence prolongé (onend parfois omis sur Chrome/Android/iOS).
                 idlePolls += 1;
                 if (idlePolls >= IDLE_POLLS_REQUIRED) {
-                    finish(true);
+                    idlePolls = 0;
+                    if (chunkIdx + 1 < chunks.length) {
+                        chunkIdx += 1;
+                        speakCurrentChunk();
+                    } else {
+                        finish(true);
+                    }
                 }
             }, POLL_INTERVAL_MS);
         };
 
-        // Lancement synchrone dans le fil de l'appel pour préserver le geste utilisateur (iOS Safari).
-        launch(true);
+        // Chrome/Blink annule asynchrone­ment les voix : après un cancel(), attendre ~80 ms avant speak().
+        if (!appleWebKit && (wasBusy || sinceCancel < POST_CANCEL_DELAY_MS)) {
+            const delay = wasBusy ? POST_CANCEL_DELAY_MS : Math.max(20, POST_CANCEL_DELAY_MS - sinceCancel);
+            scheduleLaunch(candidates[0], delay);
+        } else {
+            launch(candidates[0]);
+        }
     }
 
     stop() {
@@ -497,14 +603,21 @@ export class WebNarrator {
             let busy = false;
             try { busy = Boolean(synth.speaking || synth.pending); } catch { busy = false; }
             if (wasActive || busy) {
+                this._lastCancelAt = Date.now();
                 try { synth.cancel(); } catch { /* ignore */ }
-                this._unlocked = false;
-                this._armGestureUnlock();
+                if (this._isAppleWebKit()) {
+                    this._unlocked = false;
+                    this._armGestureUnlock();
+                }
             }
         }
     }
 
     _clearTimers() {
+        if (this._deferTimer) {
+            clearTimeout(this._deferTimer);
+            this._deferTimer = null;
+        }
         if (this._pollTimer) {
             clearInterval(this._pollTimer);
             this._pollTimer = null;

@@ -216,7 +216,7 @@ export function roleFor(c, accent) {
 }
 
 export function isTwoPane(width = window.innerWidth, height = window.innerHeight) {
-    return width > height * 1.15;
+    return width >= 540 && width > height * 1.15;
 }
 
 export function isDarkTheme(themeMode) {
@@ -270,6 +270,7 @@ export function applyThemeToDom(c) {
     root.setProperty('--square-dark', c.squareDark);
 
     document.documentElement.dataset.theme = c.kid ? 'kid' : (c.dark ? 'night' : 'day');
+    root.colorScheme = c.dark ? 'dark' : 'light';
     document.body.classList.toggle('kid-mode', Boolean(c.kid));
     document.body.classList.toggle('dark-theme', Boolean(c.dark));
 

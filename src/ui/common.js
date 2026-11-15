@@ -115,7 +115,7 @@ export function duckSegmentedRow({ options, selectedIndex, onSelect, icons = nul
         } else {
             btn.appendChild(createIcon('Check', 18, `duck-seg-check${active ? '' : ' hidden'}`));
         }
-        btn.appendChild(el('span', '', label));
+        btn.appendChild(el('span', 'duck-seg-label', label));
         btn.addEventListener('click', () => {
             feedback.key();
             onSelect?.(i);
@@ -470,6 +470,7 @@ export class ModuleLayoutView {
         this._ro?.observe(this.el);
         this._onWindowResize = () => this.relayout();
         window.addEventListener('resize', this._onWindowResize);
+        window.visualViewport?.addEventListener('resize', this._onWindowResize);
         document.fonts?.ready?.then(() => { if (!this._destroyed) this.relayout(); });
     }
 
@@ -477,6 +478,7 @@ export class ModuleLayoutView {
         this._destroyed = true;
         this._ro?.disconnect();
         window.removeEventListener('resize', this._onWindowResize);
+        window.visualViewport?.removeEventListener('resize', this._onWindowResize);
     }
 
     setEvalActive(active) {
@@ -576,21 +578,24 @@ export class ModuleLayoutView {
         const w = this.el.clientWidth;
         const h = this.el.clientHeight;
         if (!w || !h) return;
-        const twoPane = isTwoPane(window.innerWidth, window.innerHeight) && w > 520;
+        const twoPane = isTwoPane(window.innerWidth, window.innerHeight);
         this.el.classList.toggle('is-two-pane', twoPane);
 
         if (twoPane) {
+            this.el.classList.remove('is-portrait-scroll');
             if (this.topSlot.parentElement !== this.panelPane) this.panelPane.prepend(this.topSlot);
             const gap = 12;
             const overH = this.overSlot.offsetHeight || 0;
             const underH = this.underSlot.offsetHeight || 0;
-            const maxPanelReserve = Math.min(w * 0.42, w - 260);
-            const side = Math.max(160, Math.min(
+            const maxPanelReserve = Math.min(w * 0.42, w - 220);
+            const minPanelReserve = Math.min(308, Math.max(240, w - 160 - gap - this._evalPad));
+            const side = Math.max(150, Math.min(
                 h - overH - underH - 4,
-                w - Math.max(300, maxPanelReserve) - gap,
-                Math.floor(w * 0.58),
+                w - Math.max(minPanelReserve, maxPanelReserve) - gap - this._evalPad,
+                Math.floor(w * 0.56),
             ));
             this.boardPane.style.width = `${side + this._evalPad}px`;
+            this.boardPane.style.alignItems = '';
             this.boardHost.style.width = `${side + this._evalPad}px`;
             this.boardHost.style.height = `${side}px`;
             this.overSlot.style.width = `${side}px`;
@@ -612,9 +617,13 @@ export class ModuleLayoutView {
         const availW = Math.max(150, w - 12);
         const measuredBottom = this._measureBottomNeeded();
         const effectiveBottom = measuredBottom > 0 ? measuredBottom : this.bottomMin;
+        const availBoard = Math.floor(h - topH - overH - underH - effectiveBottom - 2);
+        const needScroll = availBoard < 148;
+        this.el.classList.toggle('is-portrait-scroll', needScroll);
+        const maxBoardW = availW - this._evalPad;
         const side = Math.max(
-            150,
-            Math.min(availW - this._evalPad, h - topH - overH - underH - effectiveBottom),
+            148,
+            Math.min(maxBoardW, needScroll ? Math.min(maxBoardW, 240) : availBoard),
         );
         this.boardPane.style.width = '';
         this.boardPane.style.alignItems = 'center';

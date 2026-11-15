@@ -546,9 +546,31 @@ test('Prefs: sanitization and range clamping on corrupted storage and setters', 
     }
 });
 
+async function withMockBrowserEnv({ ua, win, doc }, fn) {
+    const prevWinDesc = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const prevDocDesc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const prevNavDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: win });
+    Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: doc });
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value: { userAgent: ua, onLine: true } });
+    try {
+        return await fn();
+    } finally {
+        if (prevWinDesc) Object.defineProperty(globalThis, 'window', prevWinDesc);
+        else delete globalThis.window;
+        if (prevDocDesc) Object.defineProperty(globalThis, 'document', prevDocDesc);
+        else delete globalThis.document;
+        if (prevNavDesc) Object.defineProperty(globalThis, 'navigator', prevNavDesc);
+        else delete globalThis.navigator;
+    }
+}
+
+const IOS_SAFARI_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+const CHROME_DESKTOP_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const SAMSUNG_ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36';
+const CHROME_ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+
 test('WebNarrator: prepare, speak, stop, subscriptions and iOS gesture listener', async () => {
-    const prevWin = globalThis.window;
-    const prevDoc = globalThis.document;
     const listeners = new Map();
     const spoken = [];
     let cancels = 0;
@@ -584,18 +606,15 @@ test('WebNarrator: prepare, speak, stop, subscriptions and iOS gesture listener'
         addEventListener() {},
     };
 
-    globalThis.window = {
+    const win = {
         SpeechSynthesisUtterance: MockUtterance,
         speechSynthesis: mockSynth,
         addEventListener(type, fn) { listeners.set(type, fn); },
         removeEventListener(type, fn) { if (listeners.get(type) === fn) listeners.delete(type); },
     };
-    globalThis.document = {
-        visibilityState: 'visible',
-        addEventListener() {},
-    };
+    const doc = { visibilityState: 'visible', addEventListener() {} };
 
-    try {
+    await withMockBrowserEnv({ ua: IOS_SAFARI_UA, win, doc }, async () => {
         const { narrator } = await import('../src/ui/narrator.js?mock=1');
         assert.ok(listeners.has('click'));
         assert.ok(listeners.has('keydown'));
@@ -631,17 +650,10 @@ test('WebNarrator: prepare, speak, stop, subscriptions and iOS gesture listener'
 
         uAvail();
         uSpeak();
-    } finally {
-        if (prevWin === undefined) delete globalThis.window;
-        else globalThis.window = prevWin;
-        if (prevDoc === undefined) delete globalThis.document;
-        else globalThis.document = prevDoc;
-    }
+    });
 });
 
-test('WebNarrator: slow startup (>450ms), chunking long text, voice scoring, error fallback & Safari cancel retry', async () => {
-    const prevWin = globalThis.window;
-    const prevDoc = globalThis.document;
+test('WebNarrator: iOS slow startup, sequential chunking, voice scoring, error fallback & Safari cancel retry', async () => {
     const spoken = [];
     let cancels = 0;
 
@@ -693,7 +705,7 @@ test('WebNarrator: slow startup (>450ms), chunking long text, voice scoring, err
                     setTimeout(() => {
                         this.speaking = false;
                         u.onend?.();
-                    }, 30);
+                    }, 20);
                 }, 10);
             }
         },
@@ -706,15 +718,15 @@ test('WebNarrator: slow startup (>450ms), chunking long text, voice scoring, err
         addEventListener() {},
     };
 
-    globalThis.window = {
+    const win = {
         SpeechSynthesisUtterance: MockUtterance,
         speechSynthesis: mockSynth,
         addEventListener() {},
         removeEventListener() {},
     };
-    globalThis.document = { visibilityState: 'visible', addEventListener() {} };
+    const doc = { visibilityState: 'visible', addEventListener() {} };
 
-    try {
+    await withMockBrowserEnv({ ua: IOS_SAFARI_UA, win, doc }, async () => {
         const { narrator } = await import('../src/ui/narrator.js?resilience=1');
         narrator.prepare();
 
@@ -730,7 +742,7 @@ test('WebNarrator: slow startup (>450ms), chunking long text, voice scoring, err
         assert.equal(unlockU.volume, 0);
         assert.equal(unlockU.lang, 'fr-FR');
 
-        // 1) Slow cold startup (750ms before speaking = true / onstart) must NOT be aborted at 450ms!
+        // 1) Slow cold startup (750ms before speaking = true / onstart) must NOT be aborted early
         speakMode = 'slow';
         narrator.speak('Grand roque et attaque sur le centre');
         const waitIdle = narrator.awaitIdle();
@@ -745,24 +757,33 @@ test('WebNarrator: slow startup (>450ms), chunking long text, voice scoring, err
         assert.equal(slowRes.played, true);
         assert.equal(slowRes.started, true);
 
-        // 2) Long lesson text splits cleanly at sentence boundaries and waits for the last chunk
+        // 2) Long lesson text splits cleanly (<=140 chars) and queues sequentially via onend
         spoken.length = 0;
         const longText = "Première phrase complète d'introduction sur le contrôle du centre. "
             + "Deuxième phrase expliquant pourquoi le cavalier se développe vers f3 en attaquant e5. "
             + "Troisième phrase concluant sur la mise en sécurité du roi par le petit roque.";
         speakMode = 'slow';
         narrator.speak(longText);
-        assert.ok(spoken.length >= 2, `Expected >=2 chunks, got ${spoken.length}`);
-        assert.ok(spoken.every((u) => u.text.length <= 180));
+        assert.equal(spoken.length, 1, 'Sequential chunker must enqueue one utterance at a time');
+        assert.ok(spoken[0].text.length <= 140);
         mockSynth.speaking = true;
         spoken[0].onstart();
         spoken[0].onend();
+        assert.equal(spoken.length, 2, 'Finishing chunk 1 must enqueue chunk 2 immediately');
+        assert.ok(spoken[1].text.length <= 140);
         assert.equal(narrator.speaking, true, 'Must remain speaking until final chunk finishes');
-        mockSynth.speaking = false;
-        spoken[spoken.length - 1].onend();
+        while (mockSynth.speaking) {
+            const cur = spoken[spoken.length - 1];
+            const prevCount = spoken.length;
+            cur.onstart?.();
+            cur.onend?.();
+            if (spoken.length === prevCount) {
+                mockSynth.speaking = false;
+            }
+        }
         assert.equal(narrator.speaking, false);
 
-        // 3) Explicit voice rejection automatically retries with u.voice = null and succeeds
+        // 3) Explicit voice rejection automatically tries alt voice then u.voice = null and succeeds
         spoken.length = 0;
         speakMode = 'voiceError';
         narrator.speak('Coup de développement');
@@ -792,12 +813,175 @@ test('WebNarrator: slow startup (>450ms), chunking long text, voice scoring, err
         const silentRes = await narrator.awaitIdle(4000);
         assert.equal(silentRes.played, false);
         assert.equal(narrator.speaking, false);
-    } finally {
-        if (prevWin === undefined) delete globalThis.window;
-        else globalThis.window = prevWin;
-        if (prevDoc === undefined) delete globalThis.document;
-        else globalThis.document = prevDoc;
+    });
+});
+
+test('WebNarrator: Chrome Desktop & Android Chrome & Samsung Internet speech adaptations', async () => {
+    class MockUtterance {
+        constructor(text) {
+            this.text = text;
+            this.lang = '';
+            this.voice = null;
+            this.volume = 1;
+            this.rate = 1;
+            this.pitch = 1;
+            this.onstart = null;
+            this.onboundary = null;
+            this.onend = null;
+            this.onerror = null;
+        }
     }
+
+    // A) Desktop Chrome: no silent ' ' warmup, resumes paused synth, 80ms post-cancel delay, falls back to alt voice
+    {
+        const listeners = new Map();
+        const spoken = [];
+        let resumes = 0;
+        let cancels = 0;
+        let mode = 'pauseResume';
+        const voicePrimary = { lang: 'fr-FR', name: 'Hortense', localService: true, default: false };
+        const voiceBackup = { lang: 'fr-FR', name: 'Paul', localService: true, default: false };
+
+        const mockSynth = {
+            speaking: false,
+            pending: false,
+            paused: true,
+            getVoices: () => [voicePrimary, voiceBackup],
+            resume() { resumes += 1; this.paused = false; },
+            cancel() { cancels += 1; this.speaking = false; this.pending = false; },
+            speak(u) {
+                spoken.push(u);
+                if (mode === 'silentPrimary' && u.voice === voicePrimary) {
+                    // Simulate silently broken primary voice (no speaking/pending) -> should auto-switch to voiceBackup at 950ms
+                    return;
+                }
+                this.speaking = true;
+                setTimeout(() => {
+                    u.onstart?.();
+                    setTimeout(() => {
+                        this.speaking = false;
+                        u.onend?.();
+                    }, 15);
+                }, 10);
+            },
+            addEventListener() {},
+        };
+
+        await withMockBrowserEnv({
+            ua: CHROME_DESKTOP_UA,
+            win: {
+                SpeechSynthesisUtterance: MockUtterance,
+                speechSynthesis: mockSynth,
+                addEventListener: (t, fn) => listeners.set(t, fn),
+                removeEventListener: (t) => listeners.delete(t),
+            },
+            doc: { visibilityState: 'visible', addEventListener() {} },
+        }, async () => {
+            const { narrator } = await import('../src/ui/narrator.js?chrome=1');
+            assert.equal(listeners.has('click'), false, 'Chrome must NOT arm iOS gesture click listener');
+            assert.equal(narrator.unlock(true), false, 'Chrome must NOT queue silent " " utterance');
+            assert.ok(resumes >= 1, 'unlock() on non-WebKit should resume paused speechSynthesis');
+            assert.equal(spoken.length, 0);
+
+            narrator.prepare();
+            narrator.speak('Coup normal');
+            const firstRes = await narrator.awaitIdle();
+            assert.equal(firstRes.played, true);
+            assert.equal(spoken[0].voice, voicePrimary);
+
+            // While synth.speaking is true, interrupting speech on Chrome waits ~80ms after cancel()
+            spoken.length = 0;
+            mockSynth.speaking = true;
+            const startedAt = Date.now();
+            narrator.speak('Deuxième coup');
+            assert.ok(cancels >= 1);
+            assert.equal(spoken.length, 0, 'Chrome must defer speak() ~80ms after cancel()');
+            const secondRes = await narrator.awaitIdle();
+            assert.equal(secondRes.played, true);
+            assert.ok(Date.now() - startedAt >= 65);
+
+            // Silent stall on primary voice switches to secondary French voice (even when primary.default === false)
+            spoken.length = 0;
+            mode = 'silentPrimary';
+            narrator.speak('Repli sur seconde voix');
+            const fbRes = await narrator.awaitIdle(4000);
+            assert.equal(fbRes.played, true);
+            assert.ok(spoken.some((u) => u.voice === voicePrimary));
+            assert.equal(spoken[spoken.length - 1].voice, voiceBackup);
+        });
+    }
+
+    // B) Android Chrome & Samsung Internet: prefers u.voice = null + lang='fr-FR' first, falls back to picked voice if error
+    for (const [tag, ua] of [['android_chrome', CHROME_ANDROID_UA], ['samsung', SAMSUNG_ANDROID_UA]]) {
+        const spoken = [];
+        const androidFr = { lang: 'fr-FR', name: 'Samsung TTS fr', localService: true, default: true };
+        let rejectNull = false;
+
+        const mockSynth = {
+            speaking: false,
+            pending: false,
+            paused: false,
+            getVoices: () => [androidFr],
+            resume() {},
+            cancel() { this.speaking = false; this.pending = false; },
+            speak(u) {
+                spoken.push(u);
+                if (rejectNull && u.voice === null) {
+                    queueMicrotask(() => u.onerror?.({ error: 'language-unavailable' }));
+                    return;
+                }
+                this.speaking = true;
+                setTimeout(() => {
+                    u.onstart?.();
+                    setTimeout(() => {
+                        this.speaking = false;
+                        u.onend?.();
+                    }, 15);
+                }, 10);
+            },
+            addEventListener() {},
+        };
+
+        await withMockBrowserEnv({
+            ua,
+            win: {
+                SpeechSynthesisUtterance: MockUtterance,
+                speechSynthesis: mockSynth,
+                addEventListener() {},
+                removeEventListener() {},
+            },
+            doc: { visibilityState: 'visible', addEventListener() {} },
+        }, async () => {
+            const { narrator } = await import(`../src/ui/narrator.js?${tag}=1`);
+            assert.equal(narrator.unlock(true), false, `${tag} must NOT queue silent " " utterance`);
+            narrator.speak('Fou prend f7, échec');
+            const resPrimary = await narrator.awaitIdle();
+            assert.equal(resPrimary.played, true);
+            assert.equal(spoken[0].voice, null, `${tag} must leave u.voice = null initially`);
+            assert.equal(spoken[0].lang, 'fr-FR');
+
+            spoken.length = 0;
+            rejectNull = true;
+            narrator.speak('Petit roque');
+            const resFallback = await narrator.awaitIdle();
+            assert.equal(resFallback.played, true);
+            assert.equal(spoken[0].voice, null);
+            assert.equal(spoken[spoken.length - 1].voice, androidFr);
+        });
+    }
+});
+
+test('Layout: isTwoPane width/aspect-ratio boundaries across mobile and tablet viewports', async () => {
+    const { isTwoPane } = await import('../src/ui/theme.js');
+    assert.equal(isTwoPane(360, 640), false);
+    assert.equal(isTwoPane(390, 844), false);
+    assert.equal(isTwoPane(539, 360), false);
+    assert.equal(isTwoPane(540, 360), true);
+    assert.equal(isTwoPane(640, 360), true);
+    assert.equal(isTwoPane(844, 390), true);
+    assert.equal(isTwoPane(768, 1024), false);
+    assert.equal(isTwoPane(1024, 768), true);
+    assert.equal(isTwoPane(1280, 800), true);
 });
 
 test('Academy: academyStepDelayMs waits post-speech pause or readable fallback when TTS fails', async () => {

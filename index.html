@@ -2,7 +2,8 @@
 <html lang="fr" data-theme="night">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="color-scheme" content="dark light">
     <meta name="description" content="ChessDuck — Notation FIDE, Académie en 113 leçons, 150 000 problèmes Lichess, Jeu Libre avec Stockfish 19 Lite WASM et Mode Enfant, 100 % hors-ligne.">
     <meta name="theme-color" content="#0F172A">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -29,6 +30,7 @@
                 var fg = kid ? '#1F3B57' : (dark ? nightFg[pal] : dayFg[pal]);
                 var root = document.documentElement;
                 root.dataset.theme = kid ? 'kid' : (dark ? 'night' : 'day');
+                root.style.colorScheme = (kid || !dark) ? 'light' : 'dark';
                 root.style.setProperty('--bg', bg);
                 root.style.setProperty('--text', fg);
                 var meta = document.querySelector('meta[name="theme-color"]');

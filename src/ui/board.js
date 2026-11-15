@@ -19,6 +19,23 @@ function fastOutSlowIn(t) {
 
 const SHAKE_KEYS = [0, 1, -1, 0.7, -0.7, 0.35, 0];
 
+export function drawRoundRect(ctx, x, y, w, h, r) {
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, r);
+        return;
+    }
+    const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+}
+
 /** Description TalkBack/ARIA de l'échiquier. */
 export function describeBoard(p, last, selected, flipped) {
     let sb = `Échiquier, vue des ${flipped ? 'Noirs' : 'Blancs'}. Trait aux ${p.whiteToMove ? 'Blancs' : 'Noirs'}.`;
@@ -174,7 +191,9 @@ export class ChessBoardView {
 
     _syncCanvasSize() {
         const rect = this.el.getBoundingClientRect();
-        const cssSide = Math.max(0, Math.round(rect.width));
+        const cssSide = rect.height > 0
+            ? Math.max(0, Math.round(Math.min(rect.width, rect.height)))
+            : Math.max(0, Math.round(rect.width));
         if (!cssSide) return;
         const dpr = Math.min(window.devicePixelRatio || 1, 3);
         const px = Math.round(cssSide * dpr);
@@ -375,7 +394,9 @@ export class ChessBoardView {
         const ctx = this.ctx;
         const pos = this._state.position;
         if (!ctx || !pos) return;
-        const dpr = this.canvas.width / Math.max(1, this.el.getBoundingClientRect().width || this.canvas.width);
+        const rect = this.el.getBoundingClientRect();
+        const rectSide = rect.height > 0 ? Math.min(rect.width, rect.height) : rect.width;
+        const dpr = this.canvas.width / Math.max(1, rectSide || this.canvas.width);
         const cssSide = this.canvas.width / Math.max(1, dpr);
         if (cssSide <= 0) return;
 
@@ -483,7 +504,7 @@ export class ChessBoardView {
                 const ry = bottomRight ? cellY + s - margin - h : cellY + margin;
                 ctx.fillStyle = c.coordPill;
                 ctx.beginPath();
-                ctx.roundRect(rx, ry, w, h, h / 3);
+                drawRoundRect(ctx, rx, ry, w, h, h / 3);
                 ctx.fill();
                 ctx.fillStyle = c.coordInk;
                 ctx.fillText(txt, rx + pad, ry + (h - fs) * 0.55);

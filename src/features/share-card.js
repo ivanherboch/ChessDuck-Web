@@ -7,6 +7,23 @@ import { BoardGeometry } from '../ui/board-geometry.js';
 import { pieceStore } from '../ui/pieces.js';
 import { DuckPalette, hexToRgba } from '../ui/theme.js';
 
+function drawRoundRect(ctx, x, y, w, h, r) {
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, w, h, r);
+        return;
+    }
+    const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+}
+
 export const ShareFormat = {
     PORTRAIT: { name: 'PORTRAIT', height: 1350, label: 'Portrait 4:5' },
     SQUARE: { name: 'SQUARE', height: 1080, label: 'Carré 1:1' },
@@ -170,20 +187,20 @@ class Painter {
         ctx.shadowOffsetY = 6;
         ctx.fillStyle = this.pal.surface;
         ctx.beginPath();
-        ctx.roundRect(x, y, w, h, 28);
+        drawRoundRect(ctx, x, y, w, h, 28);
         ctx.fill();
         ctx.restore();
 
         ctx.strokeStyle = this.pal.stroke;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.roundRect(x, y, w, h, 28);
+        drawRoundRect(ctx, x, y, w, h, 28);
         ctx.stroke();
 
         if (accent) {
             ctx.save();
             ctx.beginPath();
-            ctx.roundRect(x, y, w, h, 28);
+            drawRoundRect(ctx, x, y, w, h, 28);
             ctx.clip();
             ctx.fillStyle = accent;
             ctx.fillRect(x, y, 8, h);
@@ -214,13 +231,13 @@ class Painter {
         ctx.shadowOffsetY = side * 0.012;
         ctx.fillStyle = this.pal.darkSq;
         ctx.beginPath();
-        ctx.roundRect(left, top, side, side, radius);
+        drawRoundRect(ctx, left, top, side, side, radius);
         ctx.fill();
         ctx.restore();
 
         ctx.save();
         ctx.beginPath();
-        ctx.roundRect(left, top, side, side, radius);
+        drawRoundRect(ctx, left, top, side, side, radius);
         ctx.clip();
 
         for (let q = 0; q < 64; q++) {
@@ -268,7 +285,7 @@ class Painter {
         ctx.strokeStyle = this.pal.light ? 'rgba(15, 23, 42, 0.16)' : 'rgba(255, 255, 255, 0.20)';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.roundRect(left, top, side, side, radius);
+        drawRoundRect(ctx, left, top, side, side, radius);
         ctx.stroke();
 
         return (q) => [x(q), y(q)];
@@ -329,7 +346,7 @@ class Painter {
         const w = this.width(label, size, true) + size * 1.4;
         this.ctx.fillStyle = bg;
         this.ctx.beginPath();
-        this.ctx.roundRect(x, y, w, size * 1.7, size * 0.85);
+        drawRoundRect(this.ctx, x, y, w, size * 1.7, size * 0.85);
         this.ctx.fill();
         this.text(label, x + size * 0.7, y + size * 1.2, size, fg, { bold: true });
         return w;
@@ -602,7 +619,7 @@ export const ShareCard = {
                     const py = ty0 - ps * 0.8;
                     g.ctx.fillStyle = pal.lightSq;
                     g.ctx.beginPath();
-                    g.ctx.roundRect(px, py, ps, ps, 10);
+                    drawRoundRect(g.ctx, px, py, ps, ps, 10);
                     g.ctx.fill();
                     const vImg = pieceStore.getPieceImage(victim, false);
                     if (vImg) g.ctx.drawImage(vImg, px, py, ps, ps);
@@ -642,13 +659,13 @@ export const ShareCard = {
         const ly = h - FOOTER_H - 18;
         g.ctx.fillStyle = pal.greenFill;
         g.ctx.beginPath();
-        g.ctx.roundRect(M, ly - 15, 48, 12, 6);
+        drawRoundRect(g.ctx, M, ly - 15, 48, 12, 6);
         g.ctx.fill();
         g.text('votre coup', M + 58, ly, 25, pal.muted);
 
         g.ctx.fillStyle = pal.redFill;
         g.ctx.beginPath();
-        g.ctx.roundRect(M + 230, ly - 13, 48, 8, 4);
+        drawRoundRect(g.ctx, M + 230, ly - 13, 48, 8, 4);
         g.ctx.fill();
         g.text('réponse adverse', M + 288, ly, 25, pal.muted);
 
