@@ -1263,15 +1263,15 @@ test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', 
     assert.match(settingsSrc, /Voix en mode enfant/);
 });
 
-test('v2.5.1: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
+test('v2.5.2: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
     const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
     const notationSrc = fs.readFileSync(path.join(ROOT, 'src/features/notation.js'), 'utf8');
 
-    assert.match(swSrc, /chessduck-v2\.5\.1-/);
-    assert.match(settingsSrc, /v2\.5\.1/);
-    assert.match(cssSrc, /v2\.5\.1/);
+    assert.match(swSrc, /chessduck-v2\.5\.2-/);
+    assert.match(settingsSrc, /v2\.5\.2/);
+    assert.match(cssSrc, /v2\.5\.2/);
     assert.match(notationSrc, /bottomMin:\s*244/);
 
     assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*40px/);
@@ -2088,3 +2088,212 @@ test('WebNarrator regressions: Android fallback cold start without idle cancel &
         });
     }
 });
+
+test('v2.5.2: ShareCard check glow on problems & solution steps, capture "x" badges & "x prise" legend', async () => {
+    const prevDoc = globalThis.document;
+    const prevImg = globalThis.Image;
+
+    const createCanvasRecorder = (cv) => {
+        const fills = [];
+        const radialGrads = [];
+        const arcs = [];
+        const texts = [];
+        const ctx = {
+            _fillStyle: '#000000',
+            _strokeStyle: '#000000',
+            font: '',
+            textAlign: 'left',
+            textBaseline: 'alphabetic',
+            lineWidth: 1,
+            lineCap: 'butt',
+            lineJoin: 'miter',
+            shadowColor: '',
+            shadowBlur: 0,
+            shadowOffsetY: 0,
+            globalAlpha: 1,
+            set fillStyle(v) { this._fillStyle = v; },
+            get fillStyle() { return this._fillStyle; },
+            set strokeStyle(v) { this._strokeStyle = v; },
+            get strokeStyle() { return this._strokeStyle; },
+            save() {},
+            restore() {},
+            beginPath() {},
+            closePath() {},
+            moveTo() {},
+            lineTo() {},
+            quadraticCurveTo() {},
+            roundRect() {},
+            clip() {},
+            stroke() {},
+            fill() {},
+            drawImage() {},
+            measureText(s) { return { width: String(s).length * 10 }; },
+            createLinearGradient() { return { addColorStop() {} }; },
+            createRadialGradient(x0, y0, r0, x1, y1, r1) {
+                const stops = [];
+                const g = { x0, y0, r0, x1, y1, r1, stops, addColorStop(off, col) { stops.push([off, col]); } };
+                radialGrads.push(g);
+                return g;
+            },
+            fillRect(x, y, w, h) {
+                fills.push({ x, y, w, h, fillStyle: this._fillStyle });
+            },
+            arc(x, y, r, s, e) {
+                arcs.push({ x, y, r, s, e, fillStyle: this._fillStyle });
+            },
+            fillText(text, x, y) {
+                texts.push({ text: String(text), x, y, fillStyle: this._fillStyle });
+            },
+        };
+        cv._recorder = { fills, radialGrads, arcs, texts };
+        return ctx;
+    };
+
+    class MockImage {
+        constructor() {
+            this.complete = false;
+            this.naturalWidth = 0;
+            this._listeners = new Map();
+            this._src = '';
+        }
+        addEventListener(ev, fn) {
+            if (!this._listeners.has(ev)) this._listeners.set(ev, []);
+            this._listeners.get(ev).push(fn);
+        }
+        set src(v) {
+            this._src = v;
+            this.complete = true;
+            this.naturalWidth = 64;
+            queueMicrotask(() => {
+                this.onload?.();
+                for (const fn of (this._listeners.get('load') || [])) fn();
+            });
+        }
+        get src() { return this._src; }
+    }
+
+    globalThis.Image = MockImage;
+    globalThis.document = {
+        createElement(tag) {
+            if (tag !== 'canvas') return {};
+            const cv = {
+                width: 0,
+                height: 0,
+                _ctx: null,
+                getContext() {
+                    if (!this._ctx) this._ctx = createCanvasRecorder(this);
+                    return this._ctx;
+                },
+                toBlob(cb) { cb(new Blob(['png'], { type: 'image/png' })); },
+            };
+            return cv;
+        },
+    };
+
+    try {
+        // 1) Problem card: checked king receives solid red square fill + radial halo; unchecked problem does not
+        const checkPuzzle = {
+            id: 'chk01',
+            fen: '6k1/5ppp/8/8/8/8/5PPP/3QR1K1 b - - 0 1',
+            moves: 'g8f8 d1d8', // dummy initial FEN only needs legal setup giving check
+            rating: 1200,
+            themes: 'mateIn1 oneMove',
+        };
+        const checkSetupPuzzle = {
+            id: 'chk02',
+            fen: '5rk1/5ppp/8/8/8/8/5PPP/3QR1K1 b - - 0 1',
+            moves: 'f8f1 g1f1', // Black Rf8xf1+ checks White Kg1 (line.positions[1].inCheck === true)
+            rating: 1100,
+            themes: 'advantage oneMove',
+        };
+        const checkLine = Line.fromUci(checkSetupPuzzle.fen, checkSetupPuzzle.moves);
+        assert.equal(checkLine.positions[1].inCheck, true);
+        const resChecked = await ShareCard.render(
+            checkSetupPuzzle,
+            checkLine.positions[1],
+            true,
+            checkLine.moves[0],
+            shareStyleFromSettings({ shareFormat: 'PORTRAIT', shareLight: false, palette: 0, boardTheme: 0 }),
+        );
+        if (resChecked.previewUrl) URL.revokeObjectURL(resChecked.previewUrl);
+        const recChecked = resChecked.canvas._recorder;
+        const redSquareFills = recChecked.fills.filter((f) => f.fillStyle === 'rgba(220, 38, 38, 0.59)');
+        assert.equal(redSquareFills.length, 1, 'Checked problem board should redden checked king square');
+        assert.ok(recChecked.radialGrads.length >= 2, 'Checked problem board should draw king radial halo in addition to background halo');
+
+        const quietLine = Line.fromUci(checkPuzzle.fen, checkPuzzle.moves);
+        assert.equal(quietLine.positions[1].inCheck, false);
+        const resQuiet = await ShareCard.render(
+            checkPuzzle,
+            quietLine.positions[1],
+            true,
+            quietLine.moves[0],
+            shareStyleFromSettings({ shareFormat: 'PORTRAIT', shareLight: true, palette: 0, boardTheme: 0 }),
+        );
+        if (resQuiet.previewUrl) URL.revokeObjectURL(resQuiet.previewUrl);
+        assert.equal(
+            resQuiet.canvas._recorder.fills.filter((f) => f.fillStyle === 'rgba(220, 38, 38, 0.59)').length,
+            0,
+            'Non-check problem board must NOT draw red check highlight',
+        );
+
+        // 2) Solution card: simultaneous check glows (player move + opponent reply), captures, mate & 'x prise' legend
+        // Setup a7a6; 1. Qxf6+ (capture+check on Kh8) Rxf6+ (reply capture+countercheck on Kf1) 2. Bxf6# (capture+mate on Kh8)
+        const doubleCheckCapPuzzle = {
+            id: 'sol252',
+            fen: '5r1k/p6p/5n2/8/3B3Q/8/P7/5KR1 b - - 0 1',
+            moves: 'a7a6 h4f6 f8f6 d4f6',
+            rating: 1550,
+            themes: 'mateIn2',
+        };
+        const solShot = await ShareCard.renderSolution(
+            doubleCheckCapPuzzle,
+            shareStyleFromSettings({ shareFormat: 'PORTRAIT', shareLight: false, palette: 0, boardTheme: 1 }),
+        );
+        if (solShot.previewUrl) URL.revokeObjectURL(solShot.previewUrl);
+        const recSol = solShot.canvas._recorder;
+        const solRedSquares = recSol.fills.filter((f) => f.fillStyle === 'rgba(220, 38, 38, 0.59)');
+        // Step 1 highlights both Kh8 (after Qxf6+) and Kf1 (after Rxf6+); Step 2 highlights Kh8 (after Bxf6#) -> 3 red king squares
+        assert.equal(solRedSquares.length, 3, 'Solution boards should highlight checked/mated king squares on every step');
+
+        // Step 1 has capture badges 'x' for Qxf6+ & Rxf6+, Step 2 has 'x' for Bxf6#, plus 1 legend badge 'x' -> 4 total
+        const xTexts = recSol.texts.filter((t) => t.text === 'x');
+        assert.equal(xTexts.length, 4, `Expected 4 'x' badges (3 board captures + 1 legend), got ${xTexts.length}`);
+        assert.ok(recSol.texts.some((t) => t.text === 'prise'), "Solution legend must include 'prise'");
+        const plusText = recSol.texts.find((t) => t.text === '+');
+        assert.ok(plusText, "Check '+' badge must still appear on check step");
+        assert.equal(recSol.texts.filter((t) => t.text === '#').length, 2, "Mate '#' badge must appear on mate step and legend");
+        assert.ok(recSol.texts.some((t) => t.text === 'Échec et mat !'), "Checkmate pill must appear");
+        // Verify Step 1 'x' badge (left, dx + 0.20*s) is to the left of '+' badge (right, dx + 0.80*s) on the same destination square f6
+        const step1X = xTexts[0];
+        assert.ok(step1X.x < plusText.x - 10, `Capture 'x' badge (${step1X.x}) must sit left of '+' badge (${plusText.x})`);
+
+        // 3) Distinct non-overlapping capture squares + en passant capture badge + light background
+        // Black plays d7d5; White plays exd6 e.p. (e5d6, capture #1 on d6) -> Black captures Nxd2 (b3d2, capture #2 on d2) -> White plays Qd1xd2 (capture #3 on d2)
+        const epAndDistinctCapPuzzle = {
+            id: 'ep252',
+            fen: '6k1/p2p1ppp/8/4P3/8/1n6/3N4/3Q2K1 b - - 0 1',
+            moves: 'd7d5 e5d6 b3d2 d1d2',
+            rating: 1400,
+            themes: 'crushing',
+        };
+        const epShot = await ShareCard.renderSolution(
+            epAndDistinctCapPuzzle,
+            shareStyleFromSettings({ shareFormat: 'SQUARE', shareLight: true, palette: 4, boardTheme: 2 }),
+        );
+        if (epShot.previewUrl) URL.revokeObjectURL(epShot.previewUrl);
+        const epTexts = epShot.canvas._recorder.texts;
+        const epXs = epTexts.filter((t) => t.text === 'x');
+        // Step 1: e5d6 (e.p. capture) + b3d2 (reply capture); Step 2: d1d2 (capture); Legend: 1 -> 4 total
+        assert.equal(epXs.length, 4, 'En passant and opponent reply captures must all receive "x" badges');
+        assert.equal(Math.round(epXs[0].x), Math.round(epXs[1].x), 'Captures on d6 and d2 share the d-file horizontal coordinate');
+        assert.ok(epXs[0].y < epXs[1].y - 100, `Player e.p. capture on d6 (y=${epXs[0].y}) must sit above reply capture on d2 (y=${epXs[1].y})`);
+        assert.ok(epTexts.some((t) => t.text === 'prise'), "Square light solution legend must include 'prise'");
+    } finally {
+        if (prevDoc === undefined) delete globalThis.document;
+        else globalThis.document = prevDoc;
+        if (prevImg === undefined) delete globalThis.Image;
+        else globalThis.Image = prevImg;
+    }
+});
+

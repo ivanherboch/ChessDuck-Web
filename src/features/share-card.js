@@ -1,5 +1,5 @@
 import {
-    KING, Line, PAWN, fileOf, isWhite, pieceType, rankOf, sqName,
+    Line, PAWN, fileOf, isWhite, pieceType, rankOf, sqName,
 } from '../core/chess.js';
 import { PieceLexiconFr } from '../core/piece-fr.js';
 import { PuzzleThemes } from '../core/puzzle-themes.js';
@@ -220,7 +220,7 @@ class Painter {
         this.text('© Ivan Herboch, 2026', W - M, y, 24, this.pal.faint, { align: 'right' });
     }
 
-    board(left, top, side, position, flipped, lastMove, glow = -1) {
+    board(left, top, side, position, flipped, lastMove, glow = []) {
         const ctx = this.ctx;
         const s = side / 8;
         const radius = side * 0.018;
@@ -251,9 +251,13 @@ class Painter {
             ctx.fillRect(x(lastMove.from), y(lastMove.from), s, s);
             ctx.fillRect(x(lastMove.to), y(lastMove.to), s, s);
         }
-        if (glow >= 0) {
-            const cx = x(glow) + s / 2;
-            const cy = y(glow) + s / 2;
+        const glowList = Array.isArray(glow) ? glow : (typeof glow === 'number' && glow >= 0 ? [glow] : []);
+        for (const q of glowList) {
+            if (q < 0 || q >= 64) continue;
+            const cx = x(q) + s / 2;
+            const cy = y(q) + s / 2;
+            ctx.fillStyle = 'rgba(220, 38, 38, 0.59)';
+            ctx.fillRect(x(q), y(q), s, s);
             const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, s * 0.8);
             rg.addColorStop(0, 'rgba(239, 68, 68, 0.90)');
             rg.addColorStop(0.55, 'rgba(239, 68, 68, 0.47)');
@@ -465,7 +469,8 @@ export const ShareCard = {
 
         g.background(h);
         drawHeader(g, eyebrow, pal.goldText, puzzle, title, titleSize, playerWhite);
-        g.board((W - side) / 2, top, side, position, !playerWhite, lastMove);
+        const checkSq = position.inCheck ? position.kingSquare(position.whiteToMove) : -1;
+        g.board((W - side) / 2, top, side, position, !playerWhite, lastMove, checkSq >= 0 ? [checkSq] : []);
 
         if (tip.length) {
             const y = top + side + 16;
@@ -585,15 +590,16 @@ export const ShareCard = {
                 g.panel(x, y, panelW, panelH);
                 const bx = x + pad;
                 const by = y + pad;
-                let glow = -1;
-                if (isLast && st.san.endsWith('#')) {
-                    const after = st.before.play(st.move);
-                    for (let q = 0; q < 64; q++) {
-                        if (after.board[q] !== 0 && pieceType(after.board[q]) === KING && isWhite(after.board[q]) !== playerWhite) {
-                            glow = q;
-                            break;
-                        }
-                    }
+                const after = st.before.play(st.move);
+                const after2 = st.reply ? after.play(st.reply) : null;
+                const glow = [];
+                if (after.inCheck) {
+                    const kq = after.kingSquare(after.whiteToMove);
+                    if (kq >= 0) glow.push(kq);
+                }
+                if (after2?.inCheck) {
+                    const kq2 = after2.kingSquare(after2.whiteToMove);
+                    if (kq2 >= 0) glow.push(kq2);
                 }
                 const at = g.board(x + (panelW - side) / 2, by, side, st.before, !playerWhite, st.prev, glow);
                 const s = side / 8;
@@ -602,6 +608,13 @@ export const ShareCard = {
                 const [dx, dy] = at(st.move.to);
                 if (st.san.endsWith('#')) g.badge('#', dx + s * 0.80, dy + s * 0.20, s * 0.22, pal.redFill, pal.onRed);
                 else if (st.san.endsWith('+')) g.badge('+', dx + s * 0.80, dy + s * 0.20, s * 0.22, pal.goldFill, pal.onGold);
+                if (st.before.isCapture(st.move)) {
+                    g.badge('x', dx + s * 0.20, dy + s * 0.20, s * 0.22, pal.text, pal.bgTop);
+                }
+                if (st.reply && after.isCapture(st.reply)) {
+                    const [rx, ry] = at(st.reply.to);
+                    g.badge('x', rx + s * 0.20, ry + s * 0.20, s * 0.22, pal.text, pal.bgTop);
+                }
 
                 const ty0 = by + side + 10 + titleSz * 0.95;
                 const br = titleSz * 0.5;
@@ -682,6 +695,8 @@ export const ShareCard = {
         g.text('échec', M + 582, ly, 25, pal.muted);
         g.badge('#', M + 680, ly - 9, 14, pal.redFill, pal.onRed);
         g.text('mat', M + 702, ly, 25, pal.muted);
+        g.badge('x', M + 790, ly - 9, 14, pal.text, pal.bgTop);
+        g.text('prise', M + 812, ly, 25, pal.muted);
         g.footer(h, puzzle.id);
 
         const blob = await canvasToBlob(cv);
