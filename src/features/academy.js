@@ -197,6 +197,7 @@ export class AcademyFeature {
             quiz: null,
             review: null,
             repertoire: null,
+            fromDrawer: false,
             stuck: null,
             voiceTip: null,
         };
@@ -408,8 +409,9 @@ export class AcademyFeature {
                 this._trainingsSheet = null;
                 this._emitTopState();
             },
+            onMarkFromDrawer: () => this.markFromDrawer(),
             onStartReviews: () => this.startReviews(),
-            onOpenLesson: (id) => this.open(id),
+            onOpenLesson: (id) => this.open(id, { guided: true }),
             onTrainTopic: (lessonId, theme) => this.trainTopic(lessonId, theme),
             onStartPlacement: () => this.startPlacement(),
             onStartExam: () => this.startExam(),
@@ -480,7 +482,19 @@ export class AcademyFeature {
         this.reflex.stop();
     }
 
+    markFromDrawer() {
+        this.state.fromDrawer = true;
+    }
+
+    _backToDrawer() {
+        if (!this.state.fromDrawer || this._destroyed) return;
+        this.state.fromDrawer = false;
+        this.openTrainings();
+    }
+
     closeTraining() {
+        const back = this.state.fromDrawer;
+        this.state.fromDrawer = false;
         this.closeEndgame();
         this.closeReflex();
         this.closePractice();
@@ -488,6 +502,7 @@ export class AcademyFeature {
         this.closeReviews();
         this.closeRepertoire();
         this._render();
+        if (back && !this._destroyed) this.openTrainings();
     }
 
     // ---- Narration ----
@@ -523,10 +538,11 @@ export class AcademyFeature {
 
     // ---- Navigation & Lesson Lifecycle ----
 
-    open(id, { save = true, variant = 0, session = false } = {}) {
+    open(id, { save = true, variant = 0, session = false, guided = false } = {}) {
         this._cancelAll();
         const l = Lessons.byId(id);
         if (!l) return;
+        if (guided) this.state.challenge = false;
         const challenge = this.state.challenge;
         const vr = Math.max(0, Math.min(l.variants.length, variant));
         Object.assign(this.state, {
@@ -556,6 +572,7 @@ export class AcademyFeature {
             quiz: null,
             review: session ? this.state.review : null,
             repertoire: session ? this.state.repertoire : null,
+            fromDrawer: session && Boolean(this.state.fromDrawer),
             stuck: null,
             voiceTip: null,
         });
@@ -1287,7 +1304,7 @@ export class AcademyFeature {
             await db.initUserState?.();
         }
         if (this._destroyed) return;
-        this.open(lessonId, { save: true });
+        this.open(lessonId, { save: true, guided: true });
         if (!theme) return;
         const level = Math.max(2, prefs.current.academyLevel || 2);
         const specs = Array.from({ length: PRACTICE_SIZE }, () => ({
@@ -1734,6 +1751,7 @@ export class AcademyFeature {
         if (this._practiceRefuteTimer) { clearTimeout(this._practiceRefuteTimer); this._practiceRefuteTimer = null; }
         this.state.practice = null;
         this._render();
+        if (!this.state.review) this._backToDrawer();
     }
 
     // ---- Endgames ----
@@ -1757,6 +1775,7 @@ export class AcademyFeature {
         this._endgameLesson = null;
         this._endgameReview = false;
         this._render();
+        if (!this.state.review) this._backToDrawer();
     }
 
     async _endgameFinished(_family, score, total) {
@@ -1808,13 +1827,17 @@ export class AcademyFeature {
         narrator.stop();
         this.reflex.stop();
         this._render();
+        this._backToDrawer();
     }
 
     // ---- Spaced Repetition Reviews ----
 
     startReviews() {
         const due = this.srs.due(this.progressList || []);
-        if (!due.length) return;
+        if (!due.length) {
+            this.state.fromDrawer = false;
+            return;
+        }
         this.state.review = { queue: due, index: 0, passed: 0, finished: false };
         this.state.repertoire = null;
         this.state.challenge = true;
@@ -1873,7 +1896,9 @@ export class AcademyFeature {
     nextReview() {
         const r = this.state.review;
         if (!r) return;
-        this.closeEndgame();
+        this.endgame?.stop();
+        this._endgameLesson = null;
+        this._endgameReview = false;
         this.state.practice = null;
         if (r.index + 1 < r.queue.length) this._openReview(r.index + 1);
         else {
@@ -1885,13 +1910,17 @@ export class AcademyFeature {
     closeReviews() {
         this.state.review = null;
         this._render();
+        this._backToDrawer();
     }
 
     // ---- Opening Repertoire Drill ----
 
     startRepertoire(white) {
         const pool = Lessons.all.filter((l) => l.category === LessonCategory.OPENING && l.heroWhite === white);
-        if (!pool.length) return;
+        if (!pool.length) {
+            this.state.fromDrawer = false;
+            return;
+        }
         const dueSet = new Set(this.srs.due(this.progressList || []));
         const dueFirst = pool.filter((l) => dueSet.has(l.id));
         const rest = pool.filter((l) => !dueSet.has(l.id));
@@ -1942,6 +1971,7 @@ export class AcademyFeature {
     closeRepertoire() {
         this.state.repertoire = null;
         this._render();
+        this._backToDrawer();
     }
 
     async _saveProgress(id, updater) {
@@ -2078,7 +2108,7 @@ export class AcademyFeature {
             srs: this.srs,
             validationOf: (l) => this.validation(l),
             onSetFilter: (cat) => this.setFilter(cat),
-            onOpen: (id) => this.open(id),
+            onOpen: (id) => this.open(id, { guided: true }),
             onClose: () => { this._catalog = null; },
         });
         this._catalog = { sheet };
@@ -2118,6 +2148,7 @@ export class AcademyFeature {
             this.topSessionWrap.replaceChildren(createSessionHeader({
                 title: stTitle.title,
                 label: stTitle.label,
+                backLabel: s.fromDrawer ? 'Revenir aux entraînements' : 'Revenir à la leçon',
                 onBack: () => this.closeTraining(),
                 onFlip: () => this.flip(),
             }));
@@ -2538,10 +2569,12 @@ export class AcademyFeature {
         } else if (eg.over) {
             if (eg.results[eg.results.length - 1] === false) {
                 this.actionRow.appendChild(duckButton({
-                    label: 'Rejouer',
+                    label: eg.before ? 'Reprendre le coup' : 'Rejouer',
                     icon: 'RestartAlt',
                     className: 'flex-1',
-                    ariaLabel: 'Rejouer cette position pour s’entraîner, sans changer le score',
+                    ariaLabel: eg.before
+                        ? "Revenir juste avant l'erreur pour s'entraîner, sans changer le score"
+                        : "Rejouer cette position pour s'entraîner, sans changer le score",
                     onClick: () => this.endgame.retry(),
                 }));
             }
@@ -2661,7 +2694,7 @@ export class AcademyFeature {
             this.actionRow.appendChild(this._buildReviewNextButton(this.state.review));
         } else if (pr.finished) {
             this.actionRow.appendChild(duckButton({
-                label: 'Revenir à la leçon',
+                label: this.state.fromDrawer ? 'Revenir aux entraînements' : 'Revenir à la leçon',
                 icon: 'ArrowBack',
                 className: 'flex-1',
                 onClick: () => this.closePractice(),
@@ -2844,7 +2877,7 @@ export class AcademyFeature {
                 icon: 'SearchOff',
                 title: 'Aucun exercice disponible',
                 message: msg,
-                actionLabel: 'Revenir à la leçon',
+                actionLabel: s.fromDrawer ? 'Revenir aux entraînements' : 'Revenir à la leçon',
                 onAction: () => this.closeTraining(),
             }));
             return;
@@ -2857,6 +2890,9 @@ export class AcademyFeature {
             const hint = heroTurn ? eg.hint : null;
             const arrows = [];
             if (eg.punish) arrows.push({ from: eg.punish.from, to: eg.punish.to, color: c.red });
+            if (eg.better && eg.replay && heroTurn && !eg.before && eg.moves === eg.beforeMoves && !(hint && eg.hintStage >= 2)) {
+                arrows.push({ from: eg.better.from, to: eg.better.to, color: c.green });
+            }
             if (hint && eg.hintStage >= 2) arrows.push({ from: hint.from, to: hint.to, color: c.green });
             const marks = (hint && eg.hintStage === 1) ? [[hint.from, c.green]] : [];
 
@@ -2890,16 +2926,17 @@ export class AcademyFeature {
             const flip = !(b ? b.start : rxPos).whiteToMove !== s.sessionFlipped;
             const arrows = [];
             if (cp) arrows.push({ from: cp.capture.from, to: cp.capture.to, color: c.blue });
-            else if (t && rx.answered) arrows.push({ from: t.attacker, to: t.target, color: c.red });
-            else if (b && rx.answered) arrows.push({ from: b.expected.from, to: b.expected.to, color: c.green });
+            else if (t && rx.answered) {
+                for (const [to, from] of t.threats) arrows.push({ from, to, color: c.red });
+            } else if (b && rx.answered) arrows.push({ from: b.expected.from, to: b.expected.to, color: c.green });
 
             const marks = [];
             if (t && rx.answered) {
-                marks.push([t.target, c.green]);
-                if (rx.tapped >= 0 && rx.tapped !== t.target) marks.push([rx.tapped, c.red]);
+                for (const to of t.targets) marks.push([to, c.green]);
+                if (rx.tapped >= 0 && !t.targets.includes(rx.tapped)) marks.push([rx.tapped, c.red]);
             } else if (b && !rx.answered && rx.from >= 0) {
                 marks.push([rx.from, c.select]);
-            } else if (b && rx.answered && rx.tapped >= 0 && !(rx.from === b.expected.from && rx.tapped === b.expected.to)) {
+            } else if (b && rx.answered && rx.tapped >= 0 && rx.tone === Tone.BAD && !(rx.from === b.expected.from && rx.tapped === b.expected.to)) {
                 marks.push([rx.tapped, c.red]);
             }
 

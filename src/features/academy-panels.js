@@ -134,7 +134,7 @@ export function buildAcademyBoardInfo({ eg, rx, pr }) {
     let text = '';
     if (rx?.blind) {
         white = rx.blind.after.whiteToMove;
-        text = `Après les coups annoncés, trait aux ${white ? 'Blancs' : 'Noirs'}`;
+        text = `Après ces coups : trait aux ${white ? 'Blancs' : 'Noirs'}`;
     } else if (rx && (rx.threat || rx.capture)) {
         const pos = rx.threat?.position || rx.capture?.position;
         white = pos.whiteToMove;
@@ -335,6 +335,7 @@ export function openTrainingsSheet({
     eg,
     rx,
     onClose,
+    onMarkFromDrawer = () => {},
     onStartReviews,
     onOpenLesson,
     onTrainTopic,
@@ -350,6 +351,11 @@ export function openTrainingsSheet({
     const pk = s.practice?.kind || null;
     const go = (fn) => () => {
         sheet.close();
+        fn();
+    };
+    const session = (fn) => () => {
+        sheet.close();
+        onMarkFromDrawer();
         fn();
     };
 
@@ -377,7 +383,7 @@ export function openTrainingsSheet({
                 detail: "Rejouez en Défi les leçons à revoir aujourd'hui.",
                 action: 'Commencer les révisions',
                 accent: 'gold',
-                onClick: go(onStartReviews),
+                onClick: session(onStartReviews),
             }));
         }
         if (cont) {
@@ -431,86 +437,68 @@ export function openTrainingsSheet({
         label: 'Test de placement : 12 positions',
         active: pk === 'PLACEMENT',
         done: home.placementDone,
-        onClick: go(onStartPlacement),
+        onClick: session(onStartPlacement),
     }));
     const examLevel = Math.max(2, home.level);
     b.appendChild(_trainingBtn({
         label: `Examen du palier ${levelName(examLevel)} : 10 positions`,
         active: pk === 'EXAM',
         done: home.examsPassed.has(examLevel),
-        onClick: go(onStartExam),
+        onClick: session(onStartExam),
     }));
 
     b.appendChild(el('h3', 'sheet-section-title', 'Réflexes'));
     b.appendChild(_trainingBtn({
         label: ReflexKind.THREAT.label,
         active: rx?.kind === ReflexKind.THREAT,
-        onClick: go(() => onStartReflex(ReflexKind.THREAT)),
+        onClick: session(() => onStartReflex(ReflexKind.THREAT)),
     }));
     b.appendChild(_trainingBtn({
         label: 'Le seul coup',
         active: pk === 'ONLY_MOVE',
-        onClick: go(onStartOnlyMove),
+        onClick: session(onStartOnlyMove),
     }));
     b.appendChild(_trainingBtn({
         label: ReflexKind.CAPTURE.label,
         active: rx?.kind === ReflexKind.CAPTURE,
-        onClick: go(() => onStartReflex(ReflexKind.CAPTURE)),
+        onClick: session(() => onStartReflex(ReflexKind.CAPTURE)),
     }));
 
     b.appendChild(el('h3', 'sheet-section-title', 'Exercices avancés'));
     b.appendChild(_trainingBtn({
         label: "Calcul à l'aveugle (palier 5)",
         active: rx?.kind === ReflexKind.BLIND,
-        onClick: go(() => onStartReflex(ReflexKind.BLIND)),
+        onClick: session(() => onStartReflex(ReflexKind.BLIND)),
     }));
 
-    // Les 11 finales jouables, repliées par défaut sauf si l'une d'elles est en cours.
-    let endgamesOpen = Boolean(eg);
-    const egHead = document.createElement('button');
-    egHead.type = 'button';
-    egHead.className = 'endgames-fold-btn';
-    const doneCount = ENDGAME_FAMILIES.filter((f) => home.endgamesDone.has(f.name)).length;
-    let egArrow = createIcon(endgamesOpen ? 'ExpandLess' : 'ExpandMore', 20);
-    const egTitle = el('span', 'endgames-fold-title', `Finales contre l'Ordinateur (${ENDGAME_FAMILIES.length})`);
-    const egCount = el('span', 'endgames-fold-count', `${doneCount}/${ENDGAME_FAMILIES.length}`);
-    egHead.append(egTitle, egCount, egArrow);
-    const egList = el('div', `endgames-fold-list${endgamesOpen ? '' : ' hidden'}`);
-    egHead.setAttribute('aria-expanded', String(endgamesOpen));
-    egHead.addEventListener('click', () => {
-        feedback.key();
-        endgamesOpen = !endgamesOpen;
-        egList.classList.toggle('hidden', !endgamesOpen);
-        egHead.setAttribute('aria-expanded', String(endgamesOpen));
-        const ic = createIcon(endgamesOpen ? 'ExpandLess' : 'ExpandMore', 20);
-        egArrow.replaceWith(ic);
-        egArrow = ic;
-    });
+    b.appendChild(el('h3', 'sheet-section-title', 'Répertoire'));
+    b.appendChild(_trainingBtn({
+        label: 'Réviser mon répertoire avec les Blancs',
+        active: s.repertoire?.white === true,
+        onClick: session(() => onStartRepertoire(true)),
+    }));
+    b.appendChild(_trainingBtn({
+        label: 'Réviser mon répertoire avec les Noirs',
+        active: s.repertoire?.white === false,
+        onClick: session(() => onStartRepertoire(false)),
+    }));
 
-    for (const [goal, goalLabel] of [[EndgameGoal.WIN, 'Gagner'], [EndgameGoal.DRAW, 'Tenir la nulle']]) {
+    // Les 11 finales jouables contre l'Ordinateur, en fin de liste, toutes visibles.
+    const doneCount = ENDGAME_FAMILIES.filter((f) => home.endgamesDone.has(f.name)).length;
+    b.appendChild(el('h3', 'sheet-section-title', `Finales contre l'Ordinateur (${doneCount}/${ENDGAME_FAMILIES.length} validées)`));
+    const egList = el('div', 'endgames-list');
+    for (const [goal, goalLabel] of [[EndgameGoal.WIN, 'À gagner'], [EndgameGoal.DRAW, 'À tenir (nulle)']]) {
         egList.appendChild(el('div', 'endgame-group-sub', goalLabel));
         for (const f of ENDGAME_FAMILIES.filter((x) => x.goal === goal)) {
             egList.appendChild(_trainingBtn({
                 label: `${f.goal === EndgameGoal.WIN ? 'Gagnez' : 'Tenez la nulle'} : ${f.label}`,
                 active: eg?.family?.name === f.name,
                 done: home.endgamesDone.has(f.name),
-                onClick: go(() => onStartEndgame(f)),
+                onClick: session(() => onStartEndgame(f)),
             }));
         }
     }
-    b.append(egHead, egList);
-
-    b.appendChild(el('h3', 'sheet-section-title', 'Répertoire'));
-    b.appendChild(_trainingBtn({
-        label: 'Réviser mon répertoire avec les Blancs',
-        active: s.repertoire?.white === true,
-        onClick: go(() => onStartRepertoire(true)),
-    }));
-    b.appendChild(_trainingBtn({
-        label: 'Réviser mon répertoire avec les Noirs',
-        active: s.repertoire?.white === false,
-        onClick: go(() => onStartRepertoire(false)),
-    }));
+    b.appendChild(egList);
 
     return sheet;
 }

@@ -411,7 +411,7 @@ export function openSettingsSheet() {
             });
         },
     });
-    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v3.2.5');
+    const copyright = el('p', 'settings-copyright', '© Ivan Herboch, 2026 · v3.3.3');
     b.append(resetEloBtn, copyright);
 
     function sync(st) {

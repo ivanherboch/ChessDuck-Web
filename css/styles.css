@@ -1,4 +1,4 @@
-/* ChessDuck v3.2.5 — Ardoise & Or + Mode Enfant (Fredoka) */
+/* ChessDuck v3.3.3 — Ardoise & Or + Mode Enfant (Fredoka) */
 
 @font-face {
     font-family: 'Fredoka';
@@ -3783,23 +3783,31 @@ button.move-strip-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 6px 8px;
     width: 100%;
     min-height: 28px;
-    padding: 0 2px;
+    padding: 2px;
 }
 
 .academy-board-info-left {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 1 1 0%;
     min-width: 0;
 }
 
 .academy-board-info-txt {
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.25;
+    overflow-wrap: break-word;
     color: var(--text);
+}
+
+.academy-board-info .step-dots {
+    flex: 0 0 auto;
 }
 
 .academy-dot-ready {
@@ -4070,36 +4078,10 @@ button.move-strip-item {
     white-space: normal;
 }
 
-.endgames-fold-btn {
-    width: 100%;
-    min-height: 48px;
-    padding: 8px 4px;
-    margin-top: 8px;
-    border: none;
-    border-radius: 10px;
-    background: transparent;
-    color: var(--text);
+.endgames-list {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    text-align: left;
-}
-
-.endgames-fold-btn:hover {
-    background: var(--surface-hi);
-}
-
-.endgames-fold-title {
-    flex: 1 1 auto;
-    font-size: 15px;
-    font-weight: 700;
-}
-
-.endgames-fold-count {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--gold-text);
+    flex-direction: column;
+    gap: 2px;
 }
 
 .endgame-group-sub {

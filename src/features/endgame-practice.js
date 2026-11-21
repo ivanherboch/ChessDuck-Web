@@ -18,27 +18,104 @@ export const EndgameGoal = Object.freeze({
     DRAW: 'DRAW',
 });
 
-function makeFamily(name, label, goal, maxMoves, task) {
+function makeFamily(name, label, goal, maxMoves, task, method) {
     const heroWhite = goal === EndgameGoal.WIN;
     const cap = task.charAt(0).toUpperCase() + task.slice(1);
     const instruction = goal === EndgameGoal.WIN
         ? `${cap} en ${maxMoves} coups au plus.`
         : `${cap} pendant ${maxMoves} coups.`;
-    return Object.freeze({ name, label, goal, maxMoves, task, heroWhite, instruction });
+    return Object.freeze({ name, label, goal, maxMoves, task, method, heroWhite, instruction });
 }
 
 export const EndgameFamily = Object.freeze({
-    KQK: makeFamily('KQK', 'Roi et dame contre roi', EndgameGoal.WIN, 12, 'matez le roi noir'),
-    KRRK: makeFamily('KRRK', 'Deux tours contre roi', EndgameGoal.WIN, 8, 'matez le roi noir'),
-    KRK: makeFamily('KRK', 'Roi et tour contre roi', EndgameGoal.WIN, 25, 'matez le roi noir'),
-    KBBK: makeFamily('KBBK', 'Les deux fous', EndgameGoal.WIN, 30, 'matez le roi noir'),
-    KPK_WIN: makeFamily('KPK_WIN', 'Roi et pion contre roi', EndgameGoal.WIN, 20, 'menez votre pion à dame'),
-    LUCENA: makeFamily('LUCENA', 'Position de Lucena', EndgameGoal.WIN, 25, 'menez votre pion à dame'),
-    PHILIDOR_DRAW: makeFamily('PHILIDOR_DRAW', 'Défense de Philidor', EndgameGoal.DRAW, 15, 'tenez la nulle'),
-    ROOK_PAWN_DRAW: makeFamily('ROOK_PAWN_DRAW', 'Pion tour : la nulle', EndgameGoal.DRAW, 15, 'tenez la nulle'),
-    KQKP: makeFamily('KQKP', 'Dame contre pion en septième', EndgameGoal.WIN, 25, 'gagnez le pion ou matez'),
-    QUEEN_BISHOP_PAWN_DRAW: makeFamily('QUEEN_BISHOP_PAWN_DRAW', 'Dame contre pion fou : le pat', EndgameGoal.DRAW, 15, 'tenez la nulle'),
-    VANCURA_DRAW: makeFamily('VANCURA_DRAW', 'Défense Vancura', EndgameGoal.DRAW, 15, 'tenez la nulle'),
+    KQK: makeFamily(
+        'KQK',
+        'Roi et dame contre roi',
+        EndgameGoal.WIN,
+        12,
+        'matez le roi noir',
+        "La dame seule coupe le roi noir, votre roi se rapproche, et l'on pousse le roi adverse sur un bord avant de mater (attention au pat).",
+    ),
+    KRRK: makeFamily(
+        'KRRK',
+        'Deux tours contre roi',
+        EndgameGoal.WIN,
+        8,
+        'matez le roi noir',
+        "Les deux tours donnent l'escalier : l'une barre une rangée, l'autre chasse le roi sur la rangée suivante jusqu'au bord.",
+    ),
+    KRK: makeFamily(
+        'KRK',
+        'Roi et tour contre roi',
+        EndgameGoal.WIN,
+        25,
+        'matez le roi noir',
+        'La tour coupe le roi noir et rétrécit sa boîte, votre roi vient se placer en face du sien, puis la tour mate sur le bord.',
+    ),
+    KBBK: makeFamily(
+        'KBBK',
+        'Les deux fous',
+        EndgameGoal.WIN,
+        30,
+        'matez le roi noir',
+        "Les deux fous côte à côte forment un mur, votre roi les soutient, et l'on repousse le roi noir vers un coin, sans le mettre pat.",
+    ),
+    KPK_WIN: makeFamily(
+        'KPK_WIN',
+        'Roi et pion contre roi',
+        EndgameGoal.WIN,
+        20,
+        'menez votre pion à dame',
+        "Le roi passe devant son pion et gagne une case clé, deux rangées devant lui. Ne poussez le pion que quand la route est sûre : si le roi noir prend l'opposition devant le pion, c'est nul.",
+    ),
+    LUCENA: makeFamily(
+        'LUCENA',
+        'Position de Lucena',
+        EndgameGoal.WIN,
+        25,
+        'menez votre pion à dame',
+        'Construisez le pont : la tour vient sur la quatrième rangée pour abriter le roi des échecs, puis le pion va à dame.',
+    ),
+    PHILIDOR_DRAW: makeFamily(
+        'PHILIDOR_DRAW',
+        'Défense de Philidor',
+        EndgameGoal.DRAW,
+        15,
+        'tenez la nulle',
+        "Gardez la tour sur votre troisième rangée pour empêcher le roi blanc d'avancer ; dès que le pion y arrive, donnez des échecs par derrière.",
+    ),
+    ROOK_PAWN_DRAW: makeFamily(
+        'ROOK_PAWN_DRAW',
+        'Pion tour : la nulle',
+        EndgameGoal.DRAW,
+        15,
+        'tenez la nulle',
+        "Gardez votre roi dans le coin, devant le pion tour : personne ne peut l'en chasser.",
+    ),
+    KQKP: makeFamily(
+        'KQKP',
+        'Dame contre pion en septième',
+        EndgameGoal.WIN,
+        25,
+        'gagnez le pion ou matez',
+        "Par des échecs et des attaques du pion, forcez le roi noir à se placer devant son pion ; chaque fois, rapprochez votre roi d'un pas.",
+    ),
+    QUEEN_BISHOP_PAWN_DRAW: makeFamily(
+        'QUEEN_BISHOP_PAWN_DRAW',
+        'Dame contre pion fou : le pat',
+        EndgameGoal.DRAW,
+        15,
+        'tenez la nulle',
+        'Réfugiez votre roi dans le coin, à côté du pion : si la dame prend le pion, c\'est pat.',
+    ),
+    VANCURA_DRAW: makeFamily(
+        'VANCURA_DRAW',
+        'Défense Vancura',
+        EndgameGoal.DRAW,
+        15,
+        'tenez la nulle',
+        "Votre tour attaque le pion tour de côté ; donnez des échecs dès que le roi blanc s'approche du pion.",
+    ),
     of(name) {
         return ENDGAME_FAMILIES.find((f) => f.name === name) || null;
     },
@@ -306,6 +383,9 @@ export class EndgameTrainer {
             punish: null,
             replay: false,
             pulse: null,
+            better: null,
+            before: null,
+            beforeMoves: 0,
         };
         this._show(0);
     }
@@ -349,8 +429,11 @@ export class EndgameTrainer {
             evalWhite: null,
             punish: null,
             replay: false,
+            better: null,
+            before: null,
+            beforeMoves: 0,
             tone: Tone.INFO,
-            message: `Position ${index + 1} sur ${this.state.total} : ${f.instruction}`,
+            message: `Position ${index + 1} sur ${this.state.total} : ${f.instruction}\n\nMéthode : ${f.method}`,
         };
         this._emit();
     }
@@ -360,12 +443,13 @@ export class EndgameTrainer {
         if (!s || !s.over || s.finished || !s.start || s.results[s.results.length - 1] !== false) return;
         this._cancelJobs();
         this._runId++;
+        const back = s.before;
         this.state = {
             ...s,
-            position: s.start,
+            position: back || s.start,
             last: null,
             anim: null,
-            moves: 0,
+            moves: back ? s.beforeMoves : 0,
             thinking: false,
             hint: null,
             hintStage: 0,
@@ -374,8 +458,11 @@ export class EndgameTrainer {
             evalWhite: null,
             punish: null,
             replay: true,
+            before: null,
             tone: Tone.INFO,
-            message: `Entraînement : rejouez la position (le score de la série ne change pas). ${s.family.instruction}`,
+            message: back && s.better
+                ? `Entraînement (hors score) : rejouez ce coup. La flèche verte montre le bon coup. ${s.family.method}`
+                : `Entraînement (hors score) : rejouez la position. ${s.family.method}`,
         };
         this._emit();
     }
@@ -478,6 +565,7 @@ export class EndgameTrainer {
             hint: null,
             hintStage: 0,
             hinting: false,
+            better: null,
         };
         this._emit();
 
@@ -525,6 +613,23 @@ export class EndgameTrainer {
         const ev = f.heroWhite ? mine : -mine;
 
         if (lost) {
+            let best = null;
+            const subCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const onAbort = () => subCtrl?.abort();
+            if (ctrl?.signal) ctrl.signal.addEventListener('abort', onAbort, { once: true });
+            const bestTimer = subCtrl ? setTimeout(() => subCtrl.abort(), timeoutMs) : null;
+            try {
+                const bestRes = await this.engine.search(pos.toFen(), this.movetimeMs, { signal: subCtrl?.signal });
+                const cand = bestRes && !bestRes.aborted ? bestRes.best : null;
+                if (cand && !cand.equals(m) && pos.isLegal(cand)) best = cand;
+            } catch {
+                best = null;
+            } finally {
+                if (bestTimer) clearTimeout(bestTimer);
+                if (ctrl?.signal) ctrl.signal.removeEventListener('abort', onAbort);
+            }
+            if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
+
             await new Promise((r) => setTimeout(r, 450));
             if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
             const punished = after.play(reply);
@@ -534,15 +639,16 @@ export class EndgameTrainer {
                 last: reply,
                 anim: moveAnim(after, reply),
                 punish: reply,
+                better: best,
+                before: pos,
+                beforeMoves: s.moves,
             };
-            const why = `L'Ordinateur répond ${after.san(reply)}.`;
-            return this._end(
-                false,
-                f.goal === EndgameGoal.WIN
-                    ? `Ce coup laisse échapper le gain. ${why} Rejouez la position, ou passez à la suivante.`
-                    : `Ce coup perd la nulle. ${why} Rejouez la position, ou passez à la suivante.`,
-                ev,
-            );
+            const san = pos.san(m);
+            const text = (f.goal === EndgameGoal.WIN ? `${san} laisse échapper le gain` : `${san} perd la nulle`)
+                + ` : l'Ordinateur répond ${after.san(reply)}.`
+                + (best ? ` Il fallait jouer ${pos.san(best)}.` : '')
+                + `\n\nMéthode : ${f.method}\n\nReprenez le coup pour vous entraîner, ou passez à la position suivante.`;
+            return this._end(false, text, ev);
         }
         if (f.goal === EndgameGoal.WIN && promoted) {
             return this._end(true, 'Le pion devient dame et le gain est assuré !', ev);
@@ -570,7 +676,7 @@ export class EndgameTrainer {
             return this._end(true, `Vous avez tenu ${moves} coups : la nulle est acquise.`, ev);
         }
         if (f.goal === EndgameGoal.WIN && moves >= f.maxMoves) {
-            return this._end(false, `Trop lent : il fallait conclure en ${f.maxMoves} coups. Cherchez une méthode plus directe.`, ev);
+            return this._end(false, `Trop lent : il fallait conclure en ${f.maxMoves} coups.\n\nMéthode : ${f.method}`, ev);
         }
         this.state = {
             ...this.state,

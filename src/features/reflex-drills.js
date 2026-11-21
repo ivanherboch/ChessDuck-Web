@@ -2,6 +2,7 @@ import {
     KING,
     PIECE_VALUES,
     Line,
+    Position,
     isWhite,
     pieceType,
     sqName,
@@ -49,6 +50,10 @@ export const ReflexDrills = {
     THREAT_THEMES,
     CAPTURE_THEMES,
 
+    /**
+     * Menace lue directement sur la position affichée (et non sur le 4e coup de la solution, ce qui évite
+     * de désigner la pièce de derrière dans une enfilade) : pièce non protégée ou valant plus que l'attaquant.
+     */
     threatFrom(p) {
         let line;
         try {
@@ -56,27 +61,82 @@ export const ReflexDrills = {
         } catch {
             return null;
         }
-        if (line.size < 4) return null;
-        const pos = line.positions[2];
-        const follow = line.moves[3];
-        if (!line.positions[3].isCapture(follow) || line.moves[2].from === follow.to || line.moves[2].to === follow.to) {
-            return null;
+        if (line.size < 2) return null;
+        const pos = line.positions[Math.min(2, line.size)];
+        const threats = this.threatsIn(pos);
+        if (threats.length === 0) return null;
+        let [target, attacker] = threats[0];
+        for (const [t, a] of threats.slice(1)) {
+            const vT = valueOf(pieceType(pos.board[t]));
+            const vCur = valueOf(pieceType(pos.board[target]));
+            if (vT > vCur || (vT === vCur && valueOf(pieceType(pos.board[a])) < valueOf(pieceType(pos.board[attacker])))) {
+                target = t;
+                attacker = a;
+            }
         }
-        const victim = pos.board[follow.to];
-        const attacker = pos.board[follow.from];
-        if (victim === 0 || attacker === 0 || isWhite(victim) !== pos.whiteToMove || isWhite(attacker) === pos.whiteToMove) {
-            return null;
-        }
-        if (pieceType(victim) === KING) return null;
-        const explanation = `${PieceLexiconFr.definiteCapitalized(pieceType(attacker))} ${sqName(follow.from)} menace de prendre `
-            + `votre ${PieceLexiconFr.name(pieceType(victim))} en ${sqName(follow.to)}.`;
+        const explanation = threats.map(([t, a]) => {
+            const victim = pieceType(pos.board[t]);
+            const by = pieceType(pos.board[a]);
+            const def = this._defended(pos, t, a);
+            const fem = PieceLexiconFr.isFeminine(victim);
+            return `${PieceLexiconFr.definiteCapitalized(by)} ${sqName(a)} menace de prendre votre ${PieceLexiconFr.name(victim)} en ${sqName(t)}`
+                + (def
+                    ? `, qui vaut plus que ${PieceLexiconFr.definite(by)}.`
+                    : ` : ${fem ? 'elle' : 'il'} n'est pas protégé${fem ? 'e' : ''}.`);
+        }).join(' ');
         return {
             position: pos,
             lastMove: line.moves[1],
-            target: follow.to,
-            attacker: follow.from,
+            target,
+            attacker,
+            threats,
+            targets: threats.map(([t]) => t),
             explanation,
         };
+    },
+
+    /**
+     * Pièces menacées du camp au trait dans [pos] : couples [cible, attaquant le moins cher]
+     * pour chaque capture adverse gagnant du matériel si l'adversaire rejouait.
+     */
+    threatsIn(pos) {
+        const q = this.opponentToMove(pos);
+        if (!q || q.inCheck) return [];
+        const byTarget = new Map();
+        for (const m of q.legalMoves) {
+            const victim = q.board[m.to];
+            if (victim === 0 || isWhite(victim) !== pos.whiteToMove || pieceType(victim) === KING || m.promo !== 0) {
+                continue;
+            }
+            const attType = pieceType(q.board[m.from]);
+            const def = this._defended(pos, m.to, m.from);
+            if (valueOf(pieceType(victim)) - (def ? valueOf(attType) : 0) <= 0) continue;
+            const prev = byTarget.get(m.to);
+            if (!prev || valueOf(attType) < valueOf(pieceType(q.board[prev]))) {
+                byTarget.set(m.to, m.from);
+            }
+        }
+        return Array.from(byTarget.entries());
+    },
+
+    /** Même position avec le trait donné à l'adversaire (« et s'il rejouait ? »). */
+    opponentToMove(pos) {
+        const f = pos.toFen().split(' ');
+        f[1] = f[1] === 'w' ? 'b' : 'w';
+        f[3] = '-';
+        try {
+            return Position.fromFen(f.join(' '));
+        } catch {
+            return null;
+        }
+    },
+
+    _defended(pos, target, from) {
+        const q = this.opponentToMove(pos);
+        if (!q) return true;
+        const m = q.legalMoves.find((x) => x.from === from && x.to === target);
+        if (!m) return true;
+        return q.play(m).legalMoves.some((x) => x.to === target);
     },
 
     blindFrom(p) {
@@ -227,7 +287,8 @@ export class ReflexTrainer {
             if (!p || runId !== this._runId) continue;
             let item = null;
             if (kind === ReflexKind.THREAT) {
-                item = ReflexDrills.threatFrom(p);
+                const t = ReflexDrills.threatFrom(p);
+                if (t && await this._threatConfirmed(t, ctrl?.signal)) item = t;
             } else if (kind === ReflexKind.CAPTURE) {
                 let pos1 = null;
                 try { pos1 = Line.fromUci(p.fen, p.moves).positions[1]; } catch { pos1 = null; }
@@ -261,27 +322,55 @@ export class ReflexTrainer {
         return this._queue.some((q) => q.position?.toFen() === item.position?.toFen() && q.target === item.target);
     }
 
-    async _confirmed(c, signal) {
-        if (!this._engineOk || !this.engine) return true;
+    async _searchBrief(fen, signal) {
+        const sub = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const onAbort = () => sub?.abort();
+        if (signal) {
+            if (signal.aborted) onAbort();
+            else signal.addEventListener('abort', onAbort, { once: true });
+        }
+        const timer = sub ? setTimeout(() => sub.abort(), 2000) : null;
         try {
-            const bestRes = await this.engine.search(c.position.toFen(), 200, { signal });
-            if (!bestRes || bestRes.aborted || bestRes.score == null) {
-                this._engineOk = false;
-                return true;
-            }
-            const after = c.position.play(c.capture);
-            if (after.legalMoves.length === 0) return c.good;
-            const replyRes = await this.engine.search(after.toFen(), 200, { signal });
-            if (!replyRes || replyRes.aborted || replyRes.score == null) {
-                this._engineOk = false;
-                return true;
-            }
-            const engineGood = bestRes.score - (-replyRes.score) <= 150;
-            return engineGood === c.good;
+            return await this.engine.search(fen, 200, { signal: sub?.signal });
         } catch {
+            return null;
+        } finally {
+            if (timer) clearTimeout(timer);
+            if (signal) signal.removeEventListener('abort', onAbort);
+        }
+    }
+
+    async _threatConfirmed(t, signal) {
+        if (!this._engineOk || !this.engine || t.position.inCheck) return true;
+        const q = ReflexDrills.opponentToMove(t.position);
+        if (!q) return false;
+        const res = await this._searchBrief(q.toFen(), signal);
+        if (signal?.aborted) return true;
+        if (!res || res.aborted || !res.best) {
             this._engineOk = false;
             return true;
         }
+        return t.targets.includes(res.best.to);
+    }
+
+    async _confirmed(c, signal) {
+        if (!this._engineOk || !this.engine) return true;
+        const bestRes = await this._searchBrief(c.position.toFen(), signal);
+        if (signal?.aborted) return true;
+        if (!bestRes || bestRes.aborted || bestRes.score == null) {
+            this._engineOk = false;
+            return true;
+        }
+        const after = c.position.play(c.capture);
+        if (after.legalMoves.length === 0) return c.good;
+        const replyRes = await this._searchBrief(after.toFen(), signal);
+        if (signal?.aborted) return true;
+        if (!replyRes || replyRes.aborted || replyRes.score == null) {
+            this._engineOk = false;
+            return true;
+        }
+        const engineGood = bestRes.score - (-replyRes.score) <= 150;
+        return engineGood === c.good;
     }
 
     _show(index) {
@@ -343,7 +432,7 @@ export class ReflexTrainer {
         if (s.blind) return this._blindTap(s, s.blind, sqIdx);
         const t = s.threat;
         if (!t) return;
-        const ok = sqIdx === t.target;
+        const ok = t.targets.includes(sqIdx);
         this.state = {
             ...s,
             answered: true,
@@ -370,10 +459,16 @@ export class ReflexTrainer {
             this._emit();
             return;
         }
-        const right = s.from === b.expected.from && sqIdx === b.expected.to;
+        const sameSq = s.from === b.expected.from && sqIdx === b.expected.to;
+        const expectedMates = b.after.play(b.expected).isCheckmate;
+        const altMateMove = (!sameSq && expectedMates)
+            ? (b.after.legalMoves.find((m) => m.from === s.from && m.to === sqIdx && b.after.play(m).isCheckmate) || null)
+            : null;
+        const right = sameSq || Boolean(altMateMove);
         const ok = right && !s.shown;
         let message;
-        if (ok) message = `Bien calculé ! Le coup suivant était ${b.answer}.`;
+        if (ok && altMateMove) message = `Bien calculé : ${b.after.san(altMateMove)} mate aussi ! La solution jouait ${b.answer}.`;
+        else if (ok) message = `Bien calculé ! Le coup suivant était ${b.answer}.`;
         else if (right) message = `Exact : ${b.answer}. Vous avez réaffiché l'échiquier : réessayez sans le regarder.`;
         else message = `Ce n'est pas le bon coup. Il fallait jouer ${b.answer}. Regardez la position après les coups annoncés.`;
         this.state = {

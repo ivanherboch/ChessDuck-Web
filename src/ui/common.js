@@ -59,6 +59,7 @@ export function duckButton({
 export function duckIconButton({
     icon,
     ariaLabel,
+    label = null,
     onClick,
     enabled = true,
     accent = null,
@@ -69,12 +70,15 @@ export function duckIconButton({
 }) {
     const on = selected === true || filled;
     const toggleOff = selected === false;
+    const lbl = ariaLabel ?? label ?? '';
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `duck-icon-btn${on ? ' is-on' : ''}${toggleOff ? ' is-toggle-off' : ''}${accent ? ` accent-${accent}` : ''} ${className}`.trim();
     btn.disabled = !enabled;
-    btn.title = ariaLabel;
-    btn.setAttribute('aria-label', ariaLabel + (badge ? ` (${badge})` : ''));
+    if (lbl) {
+        btn.title = lbl;
+        btn.setAttribute('aria-label', lbl + (badge ? ` (${badge})` : ''));
+    }
     if (selected !== null) btn.setAttribute('aria-pressed', String(Boolean(selected)));
     const inner = el('span', 'duck-icon-btn-inner');
     inner.appendChild(createIcon(icon, 22));
@@ -675,20 +679,26 @@ export class ModuleLayoutView {
             this.el.classList.remove('is-portrait-scroll');
             if (this.topSlot.parentElement !== this.panelPane) this.panelPane.prepend(this.topSlot);
             const gap = 12;
-            const overH = this.overSlot.offsetHeight || 0;
+            this.overSlot.style.width = '';
+            const overH0 = this.overSlot.offsetHeight || 0;
             const underH = this.underSlot.offsetHeight || 0;
             const maxPanelReserve = Math.min(w * 0.42, w - 220);
             const minPanelReserve = Math.min(308, Math.max(240, w - 160 - gap - this._evalPad));
-            const side = Math.max(150, Math.min(
-                h - overH - underH - 4,
+            let side = Math.max(150, Math.min(
+                h - overH0 - underH - 4,
                 w - Math.max(minPanelReserve, maxPanelReserve) - gap - this._evalPad,
                 Math.floor(w * 0.56),
             ));
+            this.overSlot.style.width = `${side}px`;
+            const overAtSide = this.overSlot.offsetHeight || 0;
+            if (overAtSide > overH0) {
+                side = Math.max(150, side - (overAtSide - overH0));
+                this.overSlot.style.width = `${side}px`;
+            }
             this.boardPane.style.width = `${side + this._evalPad}px`;
             this.boardPane.style.alignItems = '';
             this.boardHost.style.width = `${side + this._evalPad}px`;
             this.boardHost.style.height = `${side}px`;
-            this.overSlot.style.width = `${side}px`;
             this.underSlot.style.width = `${side}px`;
             this.overSlot.style.marginLeft = `${this._evalPad}px`;
             this.underSlot.style.marginLeft = `${this._evalPad}px`;
@@ -701,25 +711,36 @@ export class ModuleLayoutView {
             this.el.insertBefore(this.topSlot, this.boardPane);
         }
         this.panelPane.style.width = '';
+        this.overSlot.style.width = '';
         const topH = this.topSlot.offsetHeight || 0;
-        const overH = this.overSlot.offsetHeight || 0;
+        const overH0 = this.overSlot.offsetHeight || 0;
         const underH = this.underSlot.offsetHeight || 0;
         const availW = Math.max(150, w - 12);
         const measuredBottom = this._measureBottomNeeded();
         const effectiveBottom = measuredBottom > 0 ? measuredBottom : this.bottomMin;
-        const availBoard = Math.floor(h - topH - overH - underH - effectiveBottom - 2);
-        const needScroll = availBoard < 148;
-        this.el.classList.toggle('is-portrait-scroll', needScroll);
         const maxBoardW = availW - this._evalPad;
-        const side = Math.max(
+        let availBoard = Math.floor(h - topH - overH0 - underH - effectiveBottom - 2);
+        let needScroll = availBoard < 148;
+        let side = Math.max(
             148,
             Math.min(maxBoardW, needScroll ? Math.min(maxBoardW, 240) : availBoard),
         );
+        this.overSlot.style.width = `${side}px`;
+        const overAtSide = this.overSlot.offsetHeight || 0;
+        if (overAtSide > overH0) {
+            availBoard = Math.floor(h - topH - overAtSide - underH - effectiveBottom - 2);
+            needScroll = availBoard < 148;
+            side = Math.max(
+                148,
+                Math.min(maxBoardW, needScroll ? Math.min(maxBoardW, 240) : availBoard),
+            );
+            this.overSlot.style.width = `${side}px`;
+        }
+        this.el.classList.toggle('is-portrait-scroll', needScroll);
         this.boardPane.style.width = '';
         this.boardPane.style.alignItems = 'center';
         this.boardHost.style.width = `${side + this._evalPad}px`;
         this.boardHost.style.height = `${side}px`;
-        this.overSlot.style.width = `${side}px`;
         const underFull = this.underBoardFullWidth || Boolean(this.underSlot.querySelector('.notation-under-row'));
         this.underSlot.style.width = underFull ? `${availW}px` : `${side}px`;
         this.overSlot.style.marginLeft = `${this._evalPad}px`;
@@ -743,7 +764,7 @@ export function createSessionHeader({
     const row = el('div', 'session-header');
     const backBtn = duckIconButton({
         icon: 'ArrowBack',
-        label: backLabel,
+        ariaLabel: backLabel,
         onClick: onBack,
     });
     const textCol = el('div', 'session-header-col');
@@ -754,7 +775,7 @@ export function createSessionHeader({
     if (onFlip) {
         row.appendChild(duckIconButton({
             icon: 'SwapVert',
-            label: "Retourner l'échiquier",
+            ariaLabel: "Retourner l'échiquier",
             onClick: onFlip,
         }));
     }
@@ -808,7 +829,7 @@ export function createRefuteCountdown({ onHold }) {
     bar.appendChild(fill);
     const holdBtn = duckIconButton({
         icon: 'Pause',
-        label: 'Garder la position affichée',
+        ariaLabel: 'Garder la position affichée',
         onClick: onHold,
     });
     wrap.append(bar, holdBtn);

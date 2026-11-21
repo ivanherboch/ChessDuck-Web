@@ -1263,15 +1263,15 @@ test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', 
     assert.match(settingsSrc, /Voix en mode enfant/);
 });
 
-test('v3.2.5: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
+test('v3.3.3: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
     const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
     const notationSrc = fs.readFileSync(path.join(ROOT, 'src/features/notation.js'), 'utf8');
 
-    assert.match(swSrc, /chessduck-v3\.2\.5-/);
-    assert.match(settingsSrc, /v3\.2\.5/);
-    assert.match(cssSrc, /v3\.2\.5/);
+    assert.match(swSrc, /chessduck-v3\.3\.3-/);
+    assert.match(settingsSrc, /v3\.3\.3/);
+    assert.match(cssSrc, /v3\.3\.3/);
     assert.match(notationSrc, /bottomMin:\s*244/);
 
     assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*40px/);
@@ -2547,4 +2547,135 @@ test('v3.0.0-v3.2.5: WeakTopics, ReviewComments.topic, Prefs, IDB migration & sw
     for (const rel of walkJs(path.join(ROOT, 'src'))) {
         assert.ok(swSrc.includes(rel), `Missing from sw.js PRECACHE_URLS: ${rel}`);
     }
+});
+
+test('v3.2.6-v3.3.3: ReflexDrills threats/forks/alt mates, 211 ideas/traps, EndgameTrainer rewind & Academy v3.3.x', async () => {
+    const { ReflexDrills, ReflexTrainer, ReflexKind } = await import('../src/features/reflex-drills.js');
+    const { ENDGAME_FAMILIES, EndgameFamily, EndgameTrainer } = await import('../src/features/endgame-practice.js');
+    const { Lessons } = await import('../src/core/lessons.js');
+    const { SpokenFr } = await import('../src/core/spoken-fr.js');
+
+    // v3.2.6: Threat read on shown position (skewer hits front Queen f6, not back Rook d8)
+    const skewerPos = Position.fromFen('3rr1k1/pp3ppp/3b1q2/2p1p1B1/8/8/PPPQ1PPP/3R1RK1 b - - 0 20');
+    assert.deepEqual(ReflexDrills.threatsIn(skewerPos), [[sqFromName('f6'), sqFromName('g5')]]);
+
+    // Defended piece worth <= attacker -> no material threat
+    const safeBishop = Position.fromFen('3r2k1/8/3b4/8/8/8/3Q4/6K1 b - - 0 1');
+    assert.deepEqual(ReflexDrills.threatsIn(safeBishop), []);
+
+    // Fork: both b5 Queen and f5 Rook threatened by d4 Knight
+    const forkPos = Position.fromFen('4k3/8/8/1q3r2/3N4/8/8/4K3 b - - 0 1');
+    const forkThreats = ReflexDrills.threatsIn(forkPos);
+    assert.equal(forkThreats.length, 2);
+    assert.deepEqual(new Set(forkThreats.map(([t]) => t)), new Set([sqFromName('b5'), sqFromName('f5')]));
+    assert.ok(forkThreats.every(([, a]) => a === sqFromName('d4')));
+
+    // threatFrom picks highest-value primary target & builds explanation for all forked pieces
+    const forkThreatPuzzle = { fen: '4k3/8/8/1q3r2/8/5N2/8/4K3 w - - 0 1', moves: 'f3d4 b5b4' };
+    // Build a puzzle whose pos2 (= after ply 0 & 1) is forkPos
+    const forkThreatPuz = { fen: '4k3/8/p7/1q3r2/8/5N2/8/4K3 w - - 0 1', moves: 'a6a5 f3d4' };
+    // Wait: fen starts White to move -> ply 0 = f3d4? Let's make Black move first, ply 1 = f3d4
+    const pThreat = { fen: '4k3/p7/8/1q3r2/8/5N2/8/4K3 b - - 0 1', moves: 'a7a6 f3d4' };
+    const tItem = ReflexDrills.threatFrom(pThreat);
+    assert.ok(tItem);
+    assert.equal(tItem.target, sqFromName('b5')); // Queen > Rook
+    assert.equal(tItem.targets.length, 2);
+    assert.match(tItem.explanation, /dame en b5/);
+    assert.match(tItem.explanation, /tour en f5/);
+
+    // Engine confirmation filters out Threat exercise when engine prefers non-target square
+    const dbMock = {
+        async randomId() { return 'P1'; },
+        async byId() { return pThreat; },
+    };
+    const rejectEngine = { async search() { return { best: Move.fromUci('e1e2'), score: 500 }; } };
+    const tReject = new ReflexTrainer(dbMock, rejectEngine);
+    await tReject.start(ReflexKind.THREAT, 2, 1);
+    assert.equal(tReject.state.finished, true);
+    assert.equal(tReject.state.total, 0);
+
+    const acceptEngine = { async search() { return { best: Move.fromUci('d4f5'), score: 500 }; } };
+    const tAccept = new ReflexTrainer(dbMock, acceptEngine);
+    await tAccept.start(ReflexKind.THREAT, 2, 1);
+    assert.equal(tAccept.state.total, 1);
+    tAccept.tap(sqFromName('f5')); // secondary fork target also accepted!
+    assert.equal(tAccept.state.results[0], true);
+    assert.equal(tAccept.state.tone, 'good');
+
+    // Blind alternate checkmate (Qe8# when solution plays Rd8#)
+    const blindAltPuzzle = {
+        fen: '6k1/p4ppp/8/8/8/8/6K1/3RQ3 b - - 0 1',
+        moves: 'a7a6 e1e2 a6a5 d1d8',
+    };
+    const dbBlindMock = {
+        async randomId() { return 'B1'; },
+        async byId() { return blindAltPuzzle; },
+    };
+    const tBlind = new ReflexTrainer(dbBlindMock, null);
+    await tBlind.start(ReflexKind.BLIND, 5, 1);
+    assert.equal(tBlind.state.total, 1);
+    tBlind.tap(sqFromName('e2'));
+    tBlind.tap(sqFromName('e8')); // Qe8# instead of Rd8#
+    assert.equal(tBlind.state.answered, true);
+    assert.equal(tBlind.state.results[0], true);
+    assert.match(tBlind.state.message, /mate aussi/);
+
+    // v3.3.0: All 211 lessons have ideas & traps, clean through SpokenFr and free of Stockfish
+    const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/lessons.json'), 'utf8'));
+    Lessons.initFromData(raw);
+    for (const l of Lessons.all) {
+        assert.ok(l.ideas.length > 0, `Lesson ${l.id} missing ideas`);
+        assert.ok(l.traps.length > 0, `Lesson ${l.id} missing traps`);
+        for (const s of [...l.ideas, ...l.traps]) {
+            const spoken = SpokenFr.text(s);
+            assert.ok(!/\b[KQRBN][a-h][1-8]\b/.test(spoken), `Untranslated notation in lesson ${l.id}: ${spoken}`);
+            assert.ok(!/stockfish/i.test(s), `Stockfish mention in lesson ${l.id}`);
+        }
+    }
+
+    // v3.3.1: All 11 endgame families define method; EndgameTrainer explains loss & rewinds via retry()
+    for (const fam of ENDGAME_FAMILIES) {
+        assert.ok(fam.method && fam.method.length > 20, `Missing method on ${fam.name}`);
+    }
+    const egEngine = {
+        async search(fen) {
+            const p = Position.fromFen(fen);
+            // If it's Black to move after White plays, return score=-100 (loss) and legal reply; if White to move, return better move
+            const m = p.legalMoves[p.legalMoves.length - 1];
+            return { best: m, score: 100 };
+        },
+    };
+    let seed = 7;
+    const trainer = new EndgameTrainer(egEngine, { rnd: () => { seed = (seed * 1103515245 + 12345) >>> 0; return seed / 4294967296; }, movetimeMs: 20 });
+    trainer.start(EndgameFamily.KQK, 2);
+    const startFen = trainer.state.position.toFen();
+    assert.match(trainer.state.message, /Méthode :/);
+    const blunder = trainer.state.position.legalMoves[0];
+    await trainer.move(blunder);
+    const lost = trainer.state;
+    assert.equal(lost.over, true);
+    assert.equal(lost.results[0], false);
+    assert.equal(lost.before.toFen(), startFen);
+    assert.equal(lost.beforeMoves, 0);
+    assert.ok(lost.better, 'Expected better move suggestion');
+    assert.match(lost.message, /laisse échapper le gain/);
+    assert.match(lost.message, /Il fallait jouer/);
+    assert.match(lost.message, /Méthode :/);
+    assert.match(lost.message, /Reprenez le coup/);
+    trainer.retry();
+    assert.equal(trainer.state.position.toFen(), startFen);
+    assert.equal(trainer.state.before, null);
+    assert.ok(trainer.state.better, 'Better move preserved for green arrow on rewind');
+    assert.equal(trainer.state.replay, true);
+
+    // v3.3.2 & v3.3.3 source contracts
+    const panelsSrc = fs.readFileSync(path.join(ROOT, 'src/features/academy-panels.js'), 'utf8');
+    const academySrc = fs.readFileSync(path.join(ROOT, 'src/features/academy.js'), 'utf8');
+    assert.match(panelsSrc, /Après ces coups : trait aux/);
+    assert.ok(!panelsSrc.includes('endgames-fold-btn'));
+    assert.match(panelsSrc, /Finales contre l'Ordinateur.*validées/);
+    assert.match(panelsSrc, /À gagner/);
+    assert.match(panelsSrc, /À tenir \(nulle\)/);
+    assert.match(academySrc, /if \(guided\) this\.state\.challenge = false/);
+    assert.match(academySrc, /Revenir aux entraînements/);
 });

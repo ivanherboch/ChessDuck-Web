@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chessduck-v3.2.5-1';
+const CACHE_NAME = 'chessduck-v3.3.3-1';
 
 const PRECACHE_URLS = [
     './',
