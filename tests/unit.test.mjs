@@ -1263,15 +1263,15 @@ test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', 
     assert.match(settingsSrc, /Voix en mode enfant/);
 });
 
-test('v3.3.3: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
+test('v3.3.4: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
     const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
     const notationSrc = fs.readFileSync(path.join(ROOT, 'src/features/notation.js'), 'utf8');
 
-    assert.match(swSrc, /chessduck-v3\.3\.3-/);
-    assert.match(settingsSrc, /v3\.3\.3/);
-    assert.match(cssSrc, /v3\.3\.3/);
+    assert.match(swSrc, /chessduck-v3\.3\.4-/);
+    assert.match(settingsSrc, /v3\.3\.4/);
+    assert.match(cssSrc, /v3\.3\.4/);
     assert.match(notationSrc, /bottomMin:\s*244/);
 
     assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*40px/);
@@ -2678,4 +2678,93 @@ test('v3.2.6-v3.3.3: ReflexDrills threats/forks/alt mates, 211 ideas/traps, Endg
     assert.match(panelsSrc, /À tenir \(nulle\)/);
     assert.match(academySrc, /if \(guided\) this\.state\.challenge = false/);
     assert.match(academySrc, /Revenir aux entraînements/);
+});
+
+test('v3.3.4: EndgameTrainer pre-analysis, DROP_CP tolerance, engine silence undo & major piece win', async () => {
+    const {
+        ENDGAME_DROP_CP,
+        ENDGAME_ENGINE_WAIT,
+        EndgameFamily,
+        EndgameTrainer,
+    } = await import('../src/features/endgame-practice.js');
+
+    assert.equal(ENDGAME_DROP_CP, 150);
+    assert.equal(ENDGAME_ENGINE_WAIT, 10000);
+
+    // 1. Prepared analysis serves hint without re-querying engine, and DROP_CP prevents false loss when engine underestimates (score 0 -> 0)
+    const scripted = new Map();
+    const searches = [];
+    const engine = {
+        async search(fen) {
+            searches.push(fen);
+            const key = fen.split(' ').slice(0, 4).join(' ');
+            if (scripted.has(key)) return scripted.get(key);
+            const p = Position.fromFen(fen);
+            const m = p.legalMoves[0] || null;
+            return { best: m, score: 0 };
+        },
+    };
+    let s = 11;
+    const rnd = () => {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 4294967296;
+    };
+    const tr = new EndgameTrainer(engine, { rnd, movetimeMs: 20 });
+    tr.start(EndgameFamily.KPK_WIN, 1);
+    const p0 = tr.state.position;
+    // Wait a tick for _prepare(p0) microtask to run
+    await new Promise((r) => setTimeout(r, 15));
+    const countAfterPrep = searches.length;
+    assert.equal(countAfterPrep, 1);
+
+    await tr.hint();
+    assert.equal(tr.state.hintStage, 1);
+    assert.ok(tr.state.hint, 'Hint populated immediately from prepared result');
+    assert.equal(searches.length, countAfterPrep, 'hint() reused pre-analyzed search without re-querying engine');
+
+    // Play a legal non-mate move: engine evaluates both p0 and after at 0 (drop = 0 < 150) -> NOT treated as lost!
+    const m0 = p0.legalMoves.find((m) => !p0.play(m).isCheckmate && p0.play(m).legalMoves.length > 0 && m.promo === 0);
+    await tr.move(m0);
+    assert.equal(tr.state.over, false, 'Underestimated score 0 -> 0 must not trigger loss');
+    assert.equal(tr.state.results.length, 0);
+
+    // 2. Engine silence/timeout on reply -> undo move, restore position & moves, stay playable without counting a loss
+    const p1 = tr.state.position;
+    const prevMoves = tr.state.moves;
+    const m1 = p1.legalMoves.find((m) => !p1.play(m).isCheckmate && p1.play(m).legalMoves.length > 0 && m.promo === 0);
+    const silentKey = p1.play(m1).toFen().split(' ').slice(0, 4).join(' ');
+    scripted.set(silentKey, null);
+    await tr.move(m1);
+    assert.equal(tr.state.over, false);
+    assert.equal(tr.state.position.toFen(), p1.toFen());
+    assert.equal(tr.state.last, null);
+    assert.equal(tr.state.moves, prevMoves);
+    assert.equal(tr.state.results.length, 0);
+    assert.match(tr.state.message, /rejouez votre coup/);
+    assert.ok(tr.state.anim && tr.state.anim.slides.some((sl) => sl.from === m1.to && sl.to === m1.from));
+
+    // 3. Pawn gone in PAWN_FAMILIES: major piece vs bare King -> WIN; opponent still has a piece -> LOSS
+    tr.stop();
+    tr.start(EndgameFamily.LUCENA, 1);
+    tr.state = {
+        ...tr.state,
+        position: Position.fromFen('4k3/8/8/8/8/8/4R3/4K3 w - - 0 1'),
+    };
+    const krMove = tr.state.position.legalMoves.find((m) => !tr.state.position.play(m).isCheckmate);
+    await tr.move(krMove);
+    assert.equal(tr.state.over, true);
+    assert.equal(tr.state.results[0], true);
+    assert.match(tr.state.message, /pièce lourde contre le roi seul/);
+
+    tr.start(EndgameFamily.LUCENA, 1);
+    tr.state = {
+        ...tr.state,
+        position: Position.fromFen('3rk3/8/8/8/8/8/4R3/4K3 w - - 0 1'),
+    };
+    const krVsRookMove = tr.state.position.legalMoves.find((m) => m.to !== sqFromName('d8') && !tr.state.position.play(m).isCheckmate);
+    await tr.move(krVsRookMove);
+    assert.equal(tr.state.over, true);
+    assert.equal(tr.state.results[0], false);
+    assert.match(tr.state.message, /pion est perdu/);
+    tr.stop();
 });

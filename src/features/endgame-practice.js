@@ -2,6 +2,7 @@ import {
     KING,
     PAWN,
     QUEEN,
+    ROOK,
     Position,
     fileOf,
     isWhite,
@@ -11,7 +12,7 @@ import {
 } from '../core/chess.js';
 import { MATE, isMateScore } from '../core/stockfish.js';
 import { Tone } from '../ui/common.js';
-import { moveAnim } from '../ui/line-playback.js';
+import { moveAnim, undoAnim } from '../ui/line-playback.js';
 
 export const EndgameGoal = Object.freeze({
     WIN: 'WIN',
@@ -325,6 +326,8 @@ export const EndgamePositions = {
 
 export const ENDGAME_PASS = 3;
 export const ENDGAME_WIN_CP = 250;
+export const ENDGAME_DROP_CP = 150;
+export const ENDGAME_ENGINE_WAIT = 10000;
 const PAWN_FAMILIES = new Set(['KPK_WIN', 'LUCENA']);
 
 function noPawns(p) {
@@ -332,6 +335,24 @@ function noPawns(p) {
         if (pieceType(p.board[i]) === PAWN) return false;
     }
     return true;
+}
+
+function onlyKing(p, white) {
+    for (let i = 0; i < 64; i++) {
+        const pc = p.board[i];
+        if (pc !== 0 && isWhite(pc) === white && pieceType(pc) !== KING) return false;
+    }
+    return true;
+}
+
+function hasMajor(p, white) {
+    for (let i = 0; i < 64; i++) {
+        const pc = p.board[i];
+        if (pc !== 0 && isWhite(pc) === white && (pieceType(pc) === ROOK || pieceType(pc) === QUEEN)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 export class EndgameTrainer {
@@ -345,6 +366,9 @@ export class EndgameTrainer {
         this._runId = 0;
         this._abortCtrl = null;
         this._hintAbortCtrl = null;
+        this._prepAbortCtrl = null;
+        this._prepFen = null;
+        this._prepPromise = null;
         this._pulses = 0;
     }
 
@@ -356,6 +380,74 @@ export class EndgameTrainer {
 
     _emit() {
         for (const fn of this._subs) fn(this.state);
+    }
+
+    _clearPrepared() {
+        this._prepAbortCtrl?.abort();
+        this._prepAbortCtrl = null;
+        this._prepFen = null;
+        this._prepPromise = null;
+    }
+
+    /**
+     * Analyse la position où l'élève a le trait pendant sa réflexion : fournit la référence d'avant coup
+     * (pour détecter une vraie baisse d'évaluation) et rend l'indice immédiat.
+     */
+    _prepare(p) {
+        if (!p || !this.engine) return;
+        const fen = p.toFen();
+        if (this._prepFen === fen && this._prepPromise) return;
+        this._clearPrepared();
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        this._prepAbortCtrl = ctrl;
+        this._prepFen = fen;
+        const timer = ctrl ? setTimeout(() => ctrl.abort(), ENDGAME_ENGINE_WAIT) : null;
+        this._prepPromise = Promise.resolve()
+            .then(() => this.engine.search(fen, this.movetimeMs, { signal: ctrl?.signal }))
+            .then((res) => (res && !res.aborted ? res : null))
+            .catch(() => null)
+            .finally(() => {
+                if (timer) clearTimeout(timer);
+            });
+    }
+
+    async _prepared(fen, signal) {
+        if (!this._prepPromise || this._prepFen !== fen) return null;
+        const p = this._prepPromise;
+        if (!signal) return p;
+        if (signal.aborted) return null;
+        return new Promise((resolve) => {
+            const onAbort = () => resolve(null);
+            signal.addEventListener('abort', onAbort, { once: true });
+            p.then(
+                (res) => {
+                    signal.removeEventListener('abort', onAbort);
+                    resolve(signal.aborted ? null : res);
+                },
+                () => {
+                    signal.removeEventListener('abort', onAbort);
+                    resolve(null);
+                },
+            );
+        });
+    }
+
+    async _searchWithWait(fen, signal) {
+        if (!this.engine || signal?.aborted) return null;
+        const sub = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const onAbort = () => sub?.abort();
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+        const timer = sub ? setTimeout(() => sub.abort(), ENDGAME_ENGINE_WAIT) : null;
+        try {
+            const res = await this.engine.search(fen, this.movetimeMs, { signal: sub?.signal });
+            if (signal?.aborted || !res || res.aborted) return null;
+            return res;
+        } catch {
+            return null;
+        } finally {
+            if (timer) clearTimeout(timer);
+            if (signal) signal.removeEventListener('abort', onAbort);
+        }
     }
 
     start(family, total = 5) {
@@ -397,11 +489,12 @@ export class EndgameTrainer {
         this._emit();
     }
 
-    _cancelJobs() {
+    _cancelJobs({ keepPrep = false } = {}) {
         this._abortCtrl?.abort();
         this._abortCtrl = null;
         this._hintAbortCtrl?.abort();
         this._hintAbortCtrl = null;
+        if (!keepPrep) this._clearPrepared();
     }
 
     _heroToMove(s = this.state) {
@@ -413,6 +506,7 @@ export class EndgameTrainer {
         const f = this.state.family;
         const p = EndgamePositions.generate(f, this.rnd);
         this._hintAbortCtrl?.abort();
+        this._clearPrepared();
         this.state = {
             ...this.state,
             index,
@@ -436,6 +530,7 @@ export class EndgameTrainer {
             message: `Position ${index + 1} sur ${this.state.total} : ${f.instruction}\n\nMéthode : ${f.method}`,
         };
         this._emit();
+        if (p.whiteToMove === f.heroWhite) this._prepare(p);
     }
 
     retry() {
@@ -444,9 +539,10 @@ export class EndgameTrainer {
         this._cancelJobs();
         this._runId++;
         const back = s.before;
+        const resumePos = back || s.start;
         this.state = {
             ...s,
-            position: back || s.start,
+            position: resumePos,
             last: null,
             anim: null,
             moves: back ? s.beforeMoves : 0,
@@ -465,6 +561,7 @@ export class EndgameTrainer {
                 : `Entraînement (hors score) : rejouez la position. ${s.family.method}`,
         };
         this._emit();
+        this._prepare(resumePos);
     }
 
     next() {
@@ -516,17 +613,13 @@ export class EndgameTrainer {
         };
         this._emit();
 
-        let best = null;
-        const timer = ctrl ? setTimeout(() => ctrl.abort(), 3000) : null;
-        try {
-            const res = await this.engine.search(fen, this.movetimeMs, { signal: ctrl?.signal });
-            if (res && !res.aborted) best = res.best || null;
-        } catch {
-            best = null;
-        } finally {
-            if (timer) clearTimeout(timer);
+        const pre = await this._prepared(fen, ctrl?.signal);
+        let best = pre?.best || null;
+        if (!best && runId === this._runId && !ctrl?.signal.aborted) {
+            const res = await this._searchWithWait(fen, ctrl?.signal);
+            best = res?.best || null;
         }
-        if (runId !== this._runId || !this.state) return;
+        if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
         if (this.state.position?.toFen() !== fen) {
             this.state = { ...this.state, hinting: false };
             this._emit();
@@ -547,8 +640,7 @@ export class EndgameTrainer {
         const s = this.state;
         const pos = s?.position;
         if (!this._heroToMove(s) || !pos || !pos.isLegal(m)) return;
-        this._hintAbortCtrl?.abort();
-        this._abortCtrl?.abort();
+        this._cancelJobs({ keepPrep: true });
         const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
         this._abortCtrl = ctrl;
         const runId = this._runId;
@@ -587,48 +679,52 @@ export class EndgameTrainer {
             return this._end(true, 'Le pion est tombé : avec la dame contre le roi seul, le gain est assuré.');
         }
         if (f.goal === EndgameGoal.WIN && noPawns(after) && PAWN_FAMILIES.has(f.name) && !promoted) {
+            if (onlyKing(after, !f.heroWhite) && hasMajor(after, f.heroWhite)) {
+                return this._end(true, 'Le pion a disparu, mais il vous reste une pièce lourde contre le roi seul : le gain est assuré.');
+            }
             return this._end(false, "Le pion est perdu : le gain s'est envolé.");
         }
 
-        let res = null;
-        const timeoutMs = this.movetimeMs * 5 + 1000;
-        const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
-        try {
-            res = await this.engine.search(after.toFen(), this.movetimeMs, { signal: ctrl?.signal });
-        } catch {
-            res = null;
-        } finally {
-            if (timer) clearTimeout(timer);
-        }
+        // Référence d'avant coup préparée pendant la réflexion de l'élève.
+        const ref = await this._prepared(pos.toFen(), ctrl?.signal);
+        if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
+
+        const res = await this._searchWithWait(after.toFen(), ctrl?.signal);
         if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
 
         const reply = res?.best && after.isLegal(res.best) ? res.best : null;
         if (res?.score == null || !reply) {
-            return this._end(false, "L'Ordinateur ne répond pas : la position est arrêtée.");
+            this._clearPrepared();
+            this.state = {
+                ...this.state,
+                position: pos,
+                last: null,
+                anim: undoAnim(pos, m),
+                moves: s.moves,
+                thinking: false,
+                tone: Tone.GOLD,
+                message: "L'Ordinateur n'a pas répondu à temps : rejouez votre coup.",
+            };
+            this._emit();
+            this._prepare(pos);
+            return;
         }
         const mine = -res.score;
-        const lost = f.goal === EndgameGoal.WIN
+        const below = f.goal === EndgameGoal.WIN
             ? !(isMateScore(mine) && mine > 0) && mine < ENDGAME_WIN_CP
             : mine < -ENDGAME_WIN_CP;
+        const beforeScore = ref?.score ?? null;
+        const lost = below && (beforeScore === null || (beforeScore - mine) >= ENDGAME_DROP_CP);
         const ev = f.heroWhite ? mine : -mine;
 
         if (lost) {
-            let best = null;
-            const subCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-            const onAbort = () => subCtrl?.abort();
-            if (ctrl?.signal) ctrl.signal.addEventListener('abort', onAbort, { once: true });
-            const bestTimer = subCtrl ? setTimeout(() => subCtrl.abort(), timeoutMs) : null;
-            try {
-                const bestRes = await this.engine.search(pos.toFen(), this.movetimeMs, { signal: subCtrl?.signal });
-                const cand = bestRes && !bestRes.aborted ? bestRes.best : null;
-                if (cand && !cand.equals(m) && pos.isLegal(cand)) best = cand;
-            } catch {
-                best = null;
-            } finally {
-                if (bestTimer) clearTimeout(bestTimer);
-                if (ctrl?.signal) ctrl.signal.removeEventListener('abort', onAbort);
+            let cand = ref?.best || null;
+            if (!cand) {
+                const bestRes = await this._searchWithWait(pos.toFen(), ctrl?.signal);
+                if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
+                cand = bestRes?.best || null;
             }
-            if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
+            const best = (cand && !cand.equals(m) && pos.isLegal(cand)) ? cand : null;
 
             await new Promise((r) => setTimeout(r, 450));
             if (runId !== this._runId || ctrl?.signal.aborted || !this.state) return;
@@ -684,11 +780,13 @@ export class EndgameTrainer {
             message: `Coup ${moves} sur ${f.maxMoves}. ${f.instruction}`,
         };
         this._emit();
+        this._prepare(nextPos);
     }
 
     _end(ok, text, evalWhite = null) {
         const s = this.state;
         if (!s) return;
+        this._clearPrepared();
         const p = s.position;
         let ev = evalWhite;
         if (ev === null) {
