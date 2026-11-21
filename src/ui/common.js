@@ -223,9 +223,13 @@ export class FeedbackCardView {
         });
     }
 
-    update({ text, tone = Tone.INFO, title = null, actionEl = null }) {
+    update({ text, tone = Tone.INFO, title = null, actionEl = null, busy = false }) {
         this.el.className = `feedback-card tone-${tone}`;
-        this._iconWrap.replaceChildren(createIcon(TONE_ICONS[tone] || 'Info', 18));
+        if (busy) {
+            this._iconWrap.replaceChildren(el('div', 'duck-spinner duck-spinner-sm'));
+        } else {
+            this._iconWrap.replaceChildren(createIcon(TONE_ICONS[tone] || 'Info', 18));
+        }
         this._currentTitle = title;
         this._currentText = text || '';
         if (title) {
@@ -722,4 +726,91 @@ export class ModuleLayoutView {
         this.underSlot.style.marginLeft = underFull ? '0px' : `${this._evalPad}px`;
         this._refitFeedbackCards();
     }
+}
+
+/**
+ * En-tête commun des séances (Revue de partie, Vision des cases, séances de l'Académie).
+ */
+export function createSessionHeader({
+    title,
+    onBack,
+    backLabel = 'Revenir à la leçon',
+    label = null,
+    subtitle = null,
+    onFlip = null,
+    rightEl = null,
+}) {
+    const row = el('div', 'session-header');
+    const backBtn = duckIconButton({
+        icon: 'ArrowBack',
+        label: backLabel,
+        onClick: onBack,
+    });
+    const textCol = el('div', 'session-header-col');
+    if (label) textCol.appendChild(el('div', 'session-header-label', label));
+    textCol.appendChild(el('h2', 'session-header-title', title));
+    if (subtitle) textCol.appendChild(el('div', 'session-header-sub', subtitle));
+    row.append(backBtn, textCol);
+    if (onFlip) {
+        row.appendChild(duckIconButton({
+            icon: 'SwapVert',
+            label: "Retourner l'échiquier",
+            onClick: onFlip,
+        }));
+    }
+    if (rightEl) row.appendChild(rightEl);
+    return row;
+}
+
+/** Pastilles de progression (vert = réussi, rouge = erreur, or = en cours). */
+export function createStepDots(results, total, current = results.length) {
+    const row = el('div', 'step-dots');
+    let passed = 0;
+    for (let i = 0; i < total; i++) {
+        const dot = document.createElement('span');
+        let cls = 'step-dot';
+        if (i < results.length) {
+            if (results[i]) {
+                cls += ' is-good';
+                passed++;
+            } else {
+                cls += ' is-bad';
+            }
+        } else if (i === current) {
+            cls += ' is-cur';
+        }
+        dot.className = cls;
+        row.appendChild(dot);
+    }
+    row.setAttribute('aria-label', `${results.length} sur ${total}, ${passed} réussite${passed > 1 ? 's' : ''}`);
+    return row;
+}
+
+/** Rangée de 1 à 3 étoiles (notation des Défis). */
+export function createStarsRow(count, { size = 16, max = 3 } = {}) {
+    const wrap = el('span', 'stars-row');
+    wrap.setAttribute('aria-label', `${count} étoile${count > 1 ? 's' : ''} sur ${max}`);
+    for (let i = 1; i <= max; i++) {
+        const on = i <= count;
+        const ic = createIcon(on ? 'Star' : 'StarOutline', size, on ? 'star-on' : 'star-off');
+        wrap.appendChild(ic);
+    }
+    return wrap;
+}
+
+/** Barre de compte à rebours avant l'annulation automatique d'une réfutation. */
+export function createRefuteCountdown({ onHold }) {
+    const wrap = el('div', 'puz-refute-row');
+    const bar = document.createElement('div');
+    bar.className = 'puz-refute-bar';
+    bar.setAttribute('aria-label', 'Annulation automatique du coup imminente');
+    const fill = el('div', 'puz-refute-fill');
+    bar.appendChild(fill);
+    const holdBtn = duckIconButton({
+        icon: 'Pause',
+        label: 'Garder la position affichée',
+        onClick: onHold,
+    });
+    wrap.append(bar, holdBtn);
+    return { wrap, fill };
 }

@@ -23,6 +23,16 @@ const PRONUNCIATION = [
     ['Caro-Kann', 'Caro-Kane'], ['Grünfeld', 'Grunfèlde'], ['Alekhine', 'Aliékhine'], ['Pirc', 'Pirtse'],
     ['Rubinstein', 'Roubinnchtaïne'], ['Fischer', 'Fichère'], ['Lucena', 'Loucéna'], ['Boden', 'Bodène'],
     ['Evans', 'Évanse'], ['Petrov', 'Pétrof'], ['Kasparov', 'Kasparof'],
+    ['Réti', 'Rétti'], ['Philidor', 'Filidor'], ['Anastasie', 'Anastazie'], ['Scandinave', 'Skandinave'],
+    ['Nimzo-indienne', 'Nimmzo-indienne'], ['Nimzo', 'Nimmzo'],
+    ['Morphy', 'Morfi'], ['Brunswick', 'Brunesvik'], ['Isouard', 'Izouar'],
+    ['Vancura', 'Vantsoura'], ['Saavedra', 'Saavédra'], ['Anderssen', 'Andersséne'], ['Nimzowitsch', 'Nimmzovitch'],
+    ['Botvinnik', 'Botvinik'], ['Lasker', 'Laskère'], ['Bauer', 'Baouère'], ['Pillsbury', 'Pilsbéri'],
+    ['Greco', 'Gréco'], ['Taimanov', 'Taïmanof'], ['Trompowsky', 'Trompofski'], ['Marshall', 'Marchal'],
+    ['Benko', 'Bènnko'], ['desperado', 'dèspérado'], ['Smith-Morra', 'Smisse-Morra'], ['Kan', 'Kanne'],
+    ['Panov', 'Panof'], ['Budapest', 'Boudapèste'], ['Tartakower', 'Tartakovère'], ['Rotlewi', 'Rotlévi'],
+    ['Lodz', 'Woudj'], ['Sämisch', 'Zémiche'], ['AVRO', 'Avro'], ['Capablanca', 'Capablannca'],
+    ['Rossolimo', 'Rossolimmo'],
 ].map(([word, said]) => [new RegExp(`(?<![\\p{L}-])${escapeRegExp(word)}(?![\\p{L}-])`, 'giu'), said]);
 
 /**

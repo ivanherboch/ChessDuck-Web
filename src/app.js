@@ -1,13 +1,13 @@
 import { StockfishEngine } from './core/stockfish.js';
 import { db } from './data/db.js';
 import { prefs } from './data/prefs.js';
-import { AcademyFeature } from './features/academy.js';
+import { AcademyFeature, academyLevelToBand } from './features/academy.js';
 import { KidFeature } from './features/kid.js';
 import { NotationFeature } from './features/notation.js';
 import { PlayFeature } from './features/play.js';
 import { PuzzlesFeature } from './features/puzzles.js';
 import { openSettingsSheet } from './features/settings-sheet.js';
-import { duckIconButton, el } from './ui/common.js';
+import { duckButton, duckIconButton, el } from './ui/common.js';
 import { feedback } from './ui/feedback.js';
 import { createIcon } from './ui/icons.js';
 import {
@@ -165,12 +165,13 @@ class ChessDuckApp {
         mascot.className = 'app-logo';
 
         const title = el('h1', 'app-title', 'ChessDuck');
+        this.trainingsWrap = el('div', 'academy-header-btn-wrap hidden');
         this.settingsBtn = duckIconButton({
             icon: 'Settings',
             ariaLabel: 'Paramètres',
             onClick: () => openSettingsSheet(),
         });
-        this.headerEl.append(mascot, title, this.settingsBtn);
+        this.headerEl.append(mascot, title, this.trainingsWrap, this.settingsBtn);
 
         this.contentEl = el('main', 'app-content');
         this.mainEl.append(this.headerEl, this.contentEl);
@@ -185,11 +186,57 @@ class ChessDuckApp {
         this.rootEl.replaceChildren(this.appShell, this.kidShell);
     }
 
+    _syncTrainingsButton(topState = null) {
+        if (!this.trainingsWrap) return;
+        const visible = this.activeTab === 1 && !prefs.current.kidMode;
+        this.trainingsWrap.classList.toggle('hidden', !visible);
+        if (!visible) return;
+        const st = topState || this.features[1]?.topBarState?.() || { suggestions: 0, trainingActive: false, trainingsOpen: false };
+        const on = Boolean(st.trainingsOpen || st.trainingActive);
+        const sug = st.suggestions || 0;
+        const desc = 'Entraînements'
+            + (st.trainingActive ? ', séance en cours' : '')
+            + (sug > 0 ? `, ${sug} suggestion${sug > 1 ? 's' : ''} à faire maintenant` : '');
+
+        const btn = duckButton({
+            label: sug > 0 ? `Entraînements · ${sug}` : 'Entraînements',
+            icon: 'School',
+            accent: 'gold',
+            filled: on,
+            className: `academy-trainings-btn${on ? ' is-active' : ''}`,
+            ariaLabel: desc,
+            onClick: () => {
+                this._mountTab(1);
+                this.features[1]?.openTrainings?.();
+            },
+        });
+        if (sug > 0) btn.appendChild(el('span', 'academy-trainings-badge', String(sug)));
+        else if (st.trainingActive) btn.appendChild(el('span', 'academy-trainings-badge', '•'));
+        this.trainingsWrap.replaceChildren(btn);
+    }
+
     _instantiateTab(index) {
         if (index === 0) return new NotationFeature();
-        if (index === 1) return new AcademyFeature();
+        if (index === 1) {
+            return new AcademyFeature(this.engine, {
+                onTrainTheme: (theme, level) => {
+                    this.selectTab(2);
+                    this.features[2]?.train(theme, academyLevelToBand(level));
+                },
+                onPlayPosition: (fen, playerWhite) => {
+                    this.selectTab(3);
+                    this.features[3]?.startFromPosition(fen, playerWhite);
+                },
+                onTopState: (st) => this._syncTrainingsButton(st),
+            });
+        }
         if (index === 2) return new PuzzlesFeature(this.engine);
-        return new PlayFeature(this.engine);
+        return new PlayFeature(this.engine, {
+            onTrainTopic: (topic) => {
+                this.selectTab(1);
+                this.features[1]?.trainTopic(topic.lessonId, topic.theme);
+            },
+        });
     }
 
     _mountTab(index) {
@@ -206,6 +253,7 @@ class ChessDuckApp {
             f.el.classList.toggle('hidden', i !== index);
         });
         this._syncNavSelection();
+        this._syncTrainingsButton();
         feat.onActivate?.();
         requestAnimationFrame(() => {
             if (!prefs.current.kidMode && this.activeTab === index) {

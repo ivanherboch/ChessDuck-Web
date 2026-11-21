@@ -27,6 +27,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     puzzleId: '',
     notationLevel: 0,
     lessonId: 1,
+    academyLevel: 2,
+    placementDone: false,
     shareFormat: 'PORTRAIT',
     shareLight: false,
 });
@@ -59,6 +61,8 @@ function loadInitial() {
             colorChoice: clampInt(parsed.colorChoice, 0, 2, DEFAULT_SETTINGS.colorChoice),
             puzzleBand: clampInt(parsed.puzzleBand, 0, 4, DEFAULT_SETTINGS.puzzleBand),
             notationLevel: clampInt(parsed.notationLevel, 0, 3, DEFAULT_SETTINGS.notationLevel),
+            academyLevel: clampInt(parsed.academyLevel, 1, 5, DEFAULT_SETTINGS.academyLevel),
+            placementDone: parsed.placementDone !== undefined ? Boolean(parsed.placementDone) : DEFAULT_SETTINGS.placementDone,
         };
     } catch {
         return { ...DEFAULT_SETTINGS };
@@ -139,6 +143,8 @@ class PrefsStore {
     }
     setNotationLevel(v) { this._update({ notationLevel: clampInt(v, 0, 3, DEFAULT_SETTINGS.notationLevel) }); }
     setLesson(v) { this._update({ lessonId: v }); }
+    setAcademyLevel(v) { this._update({ academyLevel: clampInt(v, 1, 5, DEFAULT_SETTINGS.academyLevel) }); }
+    setPlacementDone(v) { this._update({ placementDone: Boolean(v) }); }
     setShareStyle(shareFormat, shareLight) {
         this._update({ shareFormat, shareLight });
     }

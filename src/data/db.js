@@ -4,7 +4,25 @@ export const PUZZLE_COUNT = 150_000;
 const CHUNK_SIZE = 5000;
 const NUM_CHUNKS = 30;
 const DB_NAME = 'chessduck_v2';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+
+export function normalizeLessonProgress(raw) {
+    if (!raw || raw.lessonId === undefined || raw.lessonId === null) return null;
+    const masteredAt = Number(raw.masteredAt) || 0;
+    const legacyStars = raw.stars === undefined && masteredAt > 0 ? 3 : 0;
+    return {
+        lessonId: Number(raw.lessonId),
+        masteredAt,
+        stars: raw.stars !== undefined ? Number(raw.stars) || 0 : legacyStars,
+        errors: Number(raw.errors) || 0,
+        hintsUsed: Number(raw.hintsUsed) || 0,
+        practicePassed: Number(raw.practicePassed) || 0,
+        practiceTotal: Number(raw.practiceTotal) || 0,
+        srsStage: Number(raw.srsStage) || 0,
+        nextReviewAt: Number(raw.nextReviewAt) || 0,
+        lastReviewedAt: Number(raw.lastReviewedAt) || 0,
+    };
+}
 
 async function fetchAndGunzip(url) {
     const res = await fetch(url);
@@ -98,6 +116,10 @@ class DuckDatabase {
 
         this._masteredLessons = new Set();
         this._lessonSubs = new Set();
+        this._lessonProgress = new Map();
+        this._lessonProgressSubs = new Set();
+        this._assessments = [];
+        this._assessmentSubs = new Set();
         this._games = [];
         this._gameSubs = new Set();
         this._bgSyncStarted = false;
@@ -118,6 +140,7 @@ class DuckDatabase {
                     if (!db.objectStoreNames.contains('chunks')) db.createObjectStore('chunks');
                     if (!db.objectStoreNames.contains('puzzle_progress')) db.createObjectStore('puzzle_progress', { keyPath: 'puzzleId' });
                     if (!db.objectStoreNames.contains('lesson_progress')) db.createObjectStore('lesson_progress', { keyPath: 'lessonId' });
+                    if (!db.objectStoreNames.contains('academy_assessments')) db.createObjectStore('academy_assessments', { keyPath: 'id', autoIncrement: true });
                     if (!db.objectStoreNames.contains('games')) db.createObjectStore('games', { keyPath: 'id', autoIncrement: true });
                 };
                 req.onsuccess = () => resolve(req.result);
@@ -177,9 +200,10 @@ class DuckDatabase {
     async initUserState() {
         if (this._initUserPromise) return this._initUserPromise;
         this._initUserPromise = (async () => {
-            const [pRows, lRows, gRows, chunkKeys] = await Promise.all([
+            const [pRows, lRows, aRows, gRows, chunkKeys] = await Promise.all([
                 this._idbGetAll('puzzle_progress'),
                 this._idbGetAll('lesson_progress'),
+                this._idbGetAll('academy_assessments'),
                 this._idbGetAll('games'),
                 this._idbGetAllKeys('chunks'),
             ]);
@@ -188,8 +212,20 @@ class DuckDatabase {
             this._rebuildSolvedMask();
             this._emitSolved();
 
-            this._masteredLessons = new Set(lRows.map((r) => r.lessonId));
+            this._lessonProgress = new Map();
+            const mastered = new Set();
+            for (const raw of lRows) {
+                const norm = normalizeLessonProgress(raw);
+                if (!norm) continue;
+                this._lessonProgress.set(norm.lessonId, norm);
+                if (norm.masteredAt > 0) mastered.add(norm.lessonId);
+            }
+            this._masteredLessons = mastered;
             this._emitLessons();
+            this._emitLessonProgress();
+
+            this._assessments = aRows.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+            this._emitAssessments();
 
             this._games = gRows.sort((a, b) => (b.date || 0) - (a.date || 0));
             this._emitGames();
@@ -541,9 +577,42 @@ class DuckDatabase {
     // ---- LessonProgressRepository API ----
 
     async markLesson(lessonId, at = Date.now()) {
-        this._masteredLessons.add(lessonId);
+        const cur = this._lessonProgress.get(lessonId);
+        await this.saveLessonProgress({
+            lessonId,
+            masteredAt: cur?.masteredAt > 0 ? cur.masteredAt : at,
+            stars: cur?.stars > 0 ? cur.stars : 3,
+            errors: cur?.errors || 0,
+            hintsUsed: cur?.hintsUsed || 0,
+            practicePassed: cur?.practicePassed || 0,
+            practiceTotal: cur?.practiceTotal || 0,
+            srsStage: cur?.srsStage || 0,
+            nextReviewAt: cur?.nextReviewAt || 0,
+            lastReviewedAt: cur?.lastReviewedAt || 0,
+        });
+    }
+
+    async saveLessonProgress(p) {
+        const entry = normalizeLessonProgress(p);
+        if (!entry) return;
+        this._lessonProgress.set(entry.lessonId, entry);
+        if (entry.masteredAt > 0) this._masteredLessons.add(entry.lessonId);
+        else this._masteredLessons.delete(entry.lessonId);
         this._emitLessons();
-        await this._idbPut('lesson_progress', { lessonId, masteredAt: at });
+        this._emitLessonProgress();
+        await this._idbPut('lesson_progress', entry);
+    }
+
+    get lessonProgress() {
+        return Array.from(this._lessonProgress.values());
+    }
+
+    get lessonProgressMap() {
+        return this._lessonProgress;
+    }
+
+    lessonProgressOf(lessonId) {
+        return this._lessonProgress.get(lessonId) || null;
     }
 
     subscribeMasteredLessons(fn) {
@@ -552,14 +621,64 @@ class DuckDatabase {
         return () => this._lessonSubs.delete(fn);
     }
 
+    subscribeLessonProgress(fn) {
+        this._lessonProgressSubs.add(fn);
+        fn(this.lessonProgress);
+        return () => this._lessonProgressSubs.delete(fn);
+    }
+
     _emitLessons() {
         for (const fn of this._lessonSubs) fn(this._masteredLessons);
+    }
+
+    _emitLessonProgress() {
+        const list = this.lessonProgress;
+        for (const fn of this._lessonProgressSubs) fn(list);
+    }
+
+    get assessments() {
+        return this._assessments;
+    }
+
+    subscribeAssessments(fn) {
+        this._assessmentSubs.add(fn);
+        fn(this._assessments);
+        return () => this._assessmentSubs.delete(fn);
+    }
+
+    _emitAssessments() {
+        for (const fn of this._assessmentSubs) fn(this._assessments);
+    }
+
+    async saveAssessment(a) {
+        const entry = {
+            kind: String(a.kind || ''),
+            level: Number(a.level) || 1,
+            score: Number(a.score) || 0,
+            total: Number(a.total) || 0,
+            passed: !!a.passed,
+            completedAt: Number(a.completedAt) || Date.now(),
+        };
+        const db = await this._openIdb();
+        let id = Date.now();
+        if (db) {
+            id = await new Promise((resolve) => {
+                const tx = db.transaction('academy_assessments', 'readwrite');
+                const req = tx.objectStore('academy_assessments').add(entry);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => resolve(Date.now());
+            });
+        }
+        entry.id = id;
+        this._assessments = [entry, ...this._assessments].sort((x, y) => (y.completedAt || 0) - (x.completedAt || 0));
+        this._emitAssessments();
+        return id;
     }
 
     // ---- GameRepository API ----
 
     async insertGame(record) {
-        const entry = { ...record };
+        const entry = { startFen: '', ...record };
         delete entry.id;
         const db = await this._openIdb();
         let id = Date.now();

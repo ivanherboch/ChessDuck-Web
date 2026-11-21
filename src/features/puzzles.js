@@ -1,6 +1,5 @@
-import { Line, PAWN, PIECE_NAMES_FR, pieceType } from '../core/chess.js';
+import { Line } from '../core/chess.js';
 import { PuzzleThemes } from '../core/puzzle-themes.js';
-import { isMateScore, mateIn } from '../core/stockfish.js';
 import { PUZZLE_COUNT, db } from '../data/db.js';
 import { prefs } from '../data/prefs.js';
 import { ChessBoardView } from '../ui/board.js';
@@ -16,8 +15,9 @@ import { openExportSheet } from './export-sheet.js';
 import { GameLogic } from './game-logic.js';
 import { openPuzzleCatalog } from './puzzle-catalog.js';
 
-export const REFUTE_HOLD = 4000;
-const AUTO_UNDO = ' Le coup sera annulé automatiquement.';
+import { AUTO_UNDO, REFUTE_HOLD, RefutationLogic } from './refutation.js';
+
+export { REFUTE_HOLD };
 
 /** Filtre actif du catalogue, en clair : « Intermédiaire · Clouage », « Libre · 12 résolus »… */
 function filterLabel(band, theme, solved) {
@@ -95,6 +95,12 @@ export class PuzzlesFeature {
         this._updateCatalogButton();
         await db.initUserState();
         if (this._destroyed) return;
+        this._initialized = true;
+        if (this._pendingTrain) {
+            this._pendingTrain = false;
+            await this.random();
+            return;
+        }
         const id = st.puzzleId;
         const current = id ? await db.byId(id).catch(() => null) : null;
         if (this._destroyed) return;
@@ -363,6 +369,18 @@ export class PuzzlesFeature {
         this._updateCatalogButton();
     }
 
+    train(theme, band) {
+        if (!this._initialized) {
+            this._pendingTrain = true;
+            this.state.band = band;
+            this.state.theme = theme;
+            prefs.setPuzzleFilter(band, theme);
+            this._updateCatalogButton();
+            return;
+        }
+        this.setFilter(band, theme);
+    }
+
     setFilter(band, theme) {
         this.state.band = band;
         this.state.theme = theme;
@@ -483,59 +501,33 @@ export class PuzzlesFeature {
         s.message = `${san} n'est pas la solution. Regardez la réponse des ${oppName}…`;
         this._render();
 
-        const t0 = performance.now();
-        if (!after.legalMoves.length) {
-            s.message = `${san} met l'adversaire pat : la partie serait nulle alors que vous aviez bien mieux !`;
+        this._missed = { pos, m };
+        this._refuteAbort = new AbortController();
+        const r = await RefutationLogic.reply(this.engine, pos, m, { signal: this._refuteAbort.signal });
+        this._refuteAbort = null;
+        if (this._destroyed || token !== this._refuteToken || !r) return;
+
+        if (!r.reply) {
+            s.message = r.text;
             s.refuteUntil = performance.now() + REFUTE_HOLD;
             s.refuteHold = REFUTE_HOLD;
             this._render();
-            await new Promise((r) => { this._playTimer = setTimeout(r, REFUTE_HOLD); });
-            if (!this._destroyed && token === this._refuteToken) this.retry();
+            this._playTimer = setTimeout(() => {
+                this._playTimer = null;
+                if (!this._destroyed && token === this._refuteToken) this.retry();
+            }, REFUTE_HOLD);
             return;
         }
 
-        this._refuteAbort = new AbortController();
-        const timeoutId = setTimeout(() => this._refuteAbort?.abort(), 1800);
-        let res = null;
-        try {
-            res = await this.engine.search(after.toFen(), 380, { signal: this._refuteAbort.signal });
-        } finally {
-            clearTimeout(timeoutId);
-            this._refuteAbort = null;
-        }
-        if (this._destroyed || token !== this._refuteToken) return;
-
-        const waitMs = Math.max(0, 650 - (performance.now() - t0));
-        if (waitMs > 0) {
-            await new Promise((r) => { this._playTimer = setTimeout(r, waitMs); });
-        }
-        if (this._destroyed || token !== this._refuteToken) return;
-
-        const reply = (res?.best && after.isLegal(res.best))
-            ? res.best
-            : (after.legalMoves.find((mv) => mv.to === m.to) || after.legalMoves[0]);
-        const replySan = after.san(reply);
-        const after2 = after.play(reply);
-        const score = res?.score ?? null;
-        const captured = after.board[reply.to];
-        let detail;
-        if (after2.isCheckmate) detail = ' : échec et mat !';
-        else if (score !== null && isMateScore(score) && score > 0) detail = ` et forcent le mat en ${mateIn(score)}.`;
-        else if (captured !== 0 && pieceType(captured) !== PAWN) detail = ` et capturent votre ${PIECE_NAMES_FR[pieceType(captured)].toLowerCase()}.`;
-        else if (captured !== 0) detail = ' et gagnent un pion.';
-        else if (score !== null && score > 150) detail = " et prennent l'avantage.";
-        else if (score !== null && score > -80) detail = " et égalisent : votre avantage s'est envolé.";
-        else detail = ' et se défendent : il existait un coup bien plus fort.';
-
-        s.anim = moveAnim(after, reply);
+        s.anim = moveAnim(after, r.reply);
         s.refute = {
-            position: after2,
-            last: reply,
-            arrow: { from: reply.from, to: reply.to, color: '#EF4444' },
+            position: r.position,
+            last: r.reply,
+            arrow: { from: r.reply.from, to: r.reply.to, color: this._palette?.red || '#EF4444' },
         };
         s.refuteUntil = performance.now() + REFUTE_HOLD;
         s.refuteHold = REFUTE_HOLD;
-        s.message = `Réfutation : après ${san}, les ${oppName} répondent ${replySan}${detail}${AUTO_UNDO}`;
+        s.message = r.text + AUTO_UNDO;
         this._render();
 
         this._playTimer = setTimeout(() => {
@@ -560,8 +552,10 @@ export class PuzzlesFeature {
     retry() {
         if (!this.state.refute) return;
         this._cancelTimers();
+        const m = this._missed;
+        this._missed = null;
         this.state.refute = null;
-        this.state.anim = null;
+        this.state.anim = m ? undoAnim(m.pos, m.m) : null;
         this.state.stuck = null;
         this.state.tone = Tone.INFO;
         this.state.refuteUntil = 0;

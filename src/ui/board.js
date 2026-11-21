@@ -113,6 +113,7 @@ export class ChessBoardView {
             showCoords: true,
             palette: NightColors,
             onIllegalTouch: null,
+            onSquareTap: null,
             onMove: () => {},
         };
 
@@ -171,10 +172,11 @@ export class ChessBoardView {
 
     setState(next) {
         const prevPos = this._lastPosition;
-        Object.assign(this._state, next);
+        const nextTap = 'onSquareTap' in next ? next.onSquareTap : null;
+        Object.assign(this._state, next, { onSquareTap: nextTap });
         pieceStore.preloadSet(this._state.kid).catch(() => {});
 
-        const clearStaleInteraction = !this._state.interactive &&
+        const clearStaleInteraction = (!this._state.interactive || typeof this._state.onSquareTap === 'function') &&
             (this._selected >= 0 || this._dragFrom >= 0 || this._promoPair || this._pointer);
         if (this._state.position !== prevPos || clearStaleInteraction) {
             this._lastPosition = this._state.position;
@@ -244,7 +246,7 @@ export class ChessBoardView {
             if (states.length) cell.setAttribute('aria-description', states.join(', '));
             else cell.removeAttribute('aria-description');
 
-            if (interactive) {
+            if (interactive || typeof this._state.onSquareTap === 'function') {
                 cell.setAttribute('role', 'button');
                 cell.tabIndex = 0;
                 cell.setAttribute('aria-pressed', String(q === sel));
@@ -340,7 +342,13 @@ export class ChessBoardView {
 
     _tapSquare(q) {
         const pos = this._state.position;
-        if (!pos || !this._state.interactive || this._promoPair) return false;
+        if (!pos || this._promoPair) return false;
+        if (typeof this._state.onSquareTap === 'function') {
+            feedback.unlock();
+            this._state.onSquareTap(q);
+            return true;
+        }
+        if (!this._state.interactive) return false;
         if (this._selected >= 0 && this._selected !== q && this._tryMove(this._selected, q, false)) {
             return true;
         }
@@ -424,7 +432,8 @@ export class ChessBoardView {
         };
 
         this.canvas.addEventListener('pointerdown', (e) => {
-            if (!this._state.interactive || this._promoPair || !this._state.position) return;
+            const hasTap = typeof this._state.onSquareTap === 'function';
+            if ((!this._state.interactive && !hasTap) || this._promoPair || !this._state.position) return;
             if (e.button !== 0 && e.pointerType === 'mouse') return;
             e.preventDefault();
             feedback.unlock();
@@ -433,7 +442,7 @@ export class ChessBoardView {
             const s = size / 8;
             const sqDown = BoardGeometry.squareAtXY(x, y, s, this._state.flipped);
             const piece = this._state.position.board[sqDown];
-            const own = piece !== 0 && isWhite(piece) === this._state.position.whiteToMove;
+            const own = !hasTap && piece !== 0 && isWhite(piece) === this._state.position.whiteToMove;
             this._pointer = { id: e.pointerId, downX: x, downY: y, sqDown, own, dragging: false };
             try { this.canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
         });
@@ -441,6 +450,7 @@ export class ChessBoardView {
         this.canvas.addEventListener('pointermove', (e) => {
             const ptr = this._pointer;
             if (!ptr || e.pointerId !== ptr.id || !this._state.position || !this._state.interactive) return;
+            if (typeof this._state.onSquareTap === 'function') return;
             const { x, y } = coordsOf(e);
             if (ptr.own && !ptr.dragging && Math.hypot(x - ptr.downX, y - ptr.downY) > slop) {
                 ptr.dragging = true;
@@ -460,7 +470,8 @@ export class ChessBoardView {
             this._pointer = null;
             try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
             const pos = this._state.position;
-            if (!pos || !this._state.interactive) {
+            const hasTap = typeof this._state.onSquareTap === 'function';
+            if (!pos || (!this._state.interactive && !hasTap)) {
                 this._dragFrom = -1;
                 this._selected = -1;
                 this._syncA11y();

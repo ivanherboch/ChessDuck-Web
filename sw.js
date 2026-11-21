@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chessduck-v2.5.2-1';
+const CACHE_NAME = 'chessduck-v3.2.5-1';
 
 const PRECACHE_URLS = [
     './',
@@ -25,7 +25,10 @@ const PRECACHE_URLS = [
     './src/ui/narrator.js',
     './src/ui/pieces.js',
     './src/ui/theme.js',
+    './src/features/academy-assessments.js',
+    './src/features/academy-panels.js',
     './src/features/academy.js',
+    './src/features/endgame-practice.js',
     './src/features/export-sheet.js',
     './src/features/game-analysis.js',
     './src/features/game-logic.js',
@@ -33,14 +36,20 @@ const PRECACHE_URLS = [
     './src/features/kid.js',
     './src/features/lesson-catalog.js',
     './src/features/memo-sheet.js',
+    './src/features/move-judge.js',
     './src/features/notation-logic.js',
     './src/features/notation.js',
     './src/features/play.js',
     './src/features/puzzle-catalog.js',
     './src/features/puzzles.js',
+    './src/features/reflex-drills.js',
+    './src/features/refutation.js',
     './src/features/review-comments.js',
     './src/features/settings-sheet.js',
     './src/features/share-card.js',
+    './src/features/square-vision.js',
+    './src/features/srs-scheduler.js',
+    './src/features/weak-topics.js',
     './assets/mascot.png',
     './assets/mascot.svg',
     './assets/wood_move.wav',

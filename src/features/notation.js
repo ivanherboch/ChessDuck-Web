@@ -1,18 +1,19 @@
 import {
-    BISHOP, KING, KNIGHT, Line, PIECE_NAMES_FR, Position, QUEEN, ROOK, pieceLetter,
+    BISHOP, KING, KNIGHT, Line, PIECE_NAMES_FR, Position, QUEEN, ROOK, pieceLetter, sqName,
 } from '../core/chess.js';
 import { PUZZLE_COUNT, db } from '../data/db.js';
 import { prefs } from '../data/prefs.js';
 import { ChessBoardView } from '../ui/board.js';
 import {
     FeedbackCardView, ModuleLayoutView, Tone,
-    duckButton, duckIconButton, el, hintIconButton, hintLabel, infoPill, loadingState,
+    createSessionHeader, duckButton, duckIconButton, el, hintIconButton, hintLabel, infoPill, loadingState,
 } from '../ui/common.js';
 import { feedback } from '../ui/feedback.js';
 import { createIcon } from '../ui/icons.js';
 import { moveAnim } from '../ui/line-playback.js';
 import { openMemoSheet } from './memo-sheet.js';
 import { NotationLogic } from './notation-logic.js';
+import { SquareVision, VisionKind } from './square-vision.js';
 
 const LEVEL_SHORT = ['Tous', 'Bases', 'Prises', 'Roques'];
 
@@ -25,6 +26,13 @@ export class NotationFeature {
         this.feedbackCard = new FeedbackCardView();
         this.loadingEl = loadingState("Préparation de l'exercice…");
         this.el.appendChild(this.loadingEl);
+
+        this.vision = null;
+        this.visionLayout = null;
+        this.visionBoard = null;
+        this.visionCard = null;
+        this.visionMask = null;
+        this.visionBtns = null;
 
         this.state = {
             level: prefs.current.notationLevel,
@@ -68,18 +76,28 @@ export class NotationFeature {
         this.board.destroy();
         this.feedbackCard.destroy();
         this.layout.destroy();
+        if (this.visionBoard) this.visionBoard.destroy();
+        if (this.visionCard) this.visionCard.destroy();
+        if (this.visionLayout) this.visionLayout.destroy();
     }
 
     setThemeAndCoords(palette, showCoords) {
         this._palette = palette;
         this._showCoords = showCoords;
         this._renderBoard();
+        if (this.vision) this._renderVisionBoard();
     }
 
     onActivate() {
-        this.layout.relayout();
-        this.board._syncCanvasSize();
-        this.board.draw();
+        if (this.vision && this.visionLayout) {
+            this.visionLayout.relayout();
+            this.visionBoard?._syncCanvasSize();
+            this.visionBoard?.draw();
+        } else {
+            this.layout.relayout();
+            this.board._syncCanvasSize();
+            this.board.draw();
+        }
     }
 
     onDeactivate() {
@@ -119,6 +137,19 @@ export class NotationFeature {
             this.levelItems.push({ item, chk });
             this.levelMenu.appendChild(item);
         });
+        const visionItem = document.createElement('button');
+        visionItem.type = 'button';
+        visionItem.className = 'duck-dropdown-item';
+        visionItem.setAttribute('role', 'menuitem');
+        const visionIc = createIcon('Visibility', 18, 'vision-menu-icon');
+        const visionTxt = el('span', '', 'Vision des cases (exercice)');
+        visionItem.append(visionIc, visionTxt);
+        visionItem.addEventListener('click', () => {
+            feedback.key();
+            this._toggleMenu(false);
+            this.startVision();
+        });
+        this.levelMenu.appendChild(visionItem);
         this.levelWrap.append(this.levelBtn, this.levelMenu);
 
         this._docClickBound = (e) => {
@@ -551,5 +582,214 @@ export class NotationFeature {
 
         this.layout.relayout();
         this._renderBoard();
+    }
+
+    // ---- Vision des cases (exercice facultatif, sans chronomètre) ----
+
+    _askVision(score, total, kind = null) {
+        const q = SquareVision.question(Math.random, kind);
+        return {
+            question: q,
+            answered: false,
+            correct: false,
+            tapped: -1,
+            score,
+            total,
+            message: SquareVision.prompt(q),
+            tone: Tone.INFO,
+        };
+    }
+
+    _ensureVisionDom() {
+        if (this.visionLayout) return;
+        this.visionLayout = new ModuleLayoutView({ bottomMin: 200 });
+        this.visionLayout.el.classList.add('vision-layout', 'hidden');
+        this.visionBoard = new ChessBoardView();
+        this.visionCard = new FeedbackCardView();
+        this.visionMask = el('div', 'vision-mask hidden');
+        this.visionMaskText = el('div', 'vision-mask-text');
+        this.visionMask.appendChild(this.visionMaskText);
+
+        this.visionHeader = createSessionHeader({
+            title: 'Vision des cases',
+            backLabel: 'Revenir à la notation',
+            onBack: () => this.closeVision(),
+        });
+        this.visionLayout.topSlot.appendChild(this.visionHeader);
+        this.visionLayout.boardHost.append(this.visionMask, this.visionBoard.el);
+        this.visionBtns = el('div', 'equal-row vision-btn-row');
+        this.visionLayout.bottomSlot.append(this.visionCard.el, this.visionBtns);
+        this.el.appendChild(this.visionLayout.el);
+    }
+
+    startVision(kind = null) {
+        this._ensureVisionDom();
+        this.vision = this._askVision(0, 0, kind);
+        this.layout.el.classList.add('hidden');
+        this.visionLayout.el.classList.remove('hidden');
+        this._renderVision();
+    }
+
+    closeVision() {
+        if (!this.vision) return;
+        this.vision = null;
+        if (this.visionLayout) this.visionLayout.el.classList.add('hidden');
+        this.layout.el.classList.remove('hidden');
+        this.layout.relayout();
+        this.board._syncCanvasSize();
+        this.board.draw();
+    }
+
+    nextVision() {
+        const v = this.vision;
+        if (!v || !v.answered) return;
+        this.vision = this._askVision(v.score, v.total);
+        this._renderVision();
+    }
+
+    _judgeVision(v, ok, text, tapped = -1) {
+        if (ok) feedback.success();
+        else feedback.error();
+        this.vision = {
+            ...v,
+            answered: true,
+            correct: ok,
+            tapped,
+            score: v.score + (ok ? 1 : 0),
+            total: v.total + 1,
+            tone: ok ? Tone.GOOD : Tone.BAD,
+            message: text,
+        };
+        this._renderVision();
+    }
+
+    answerColor(light) {
+        const v = this.vision;
+        if (!v || v.answered || v.question.kind !== VisionKind.COLOR) return;
+        const actual = SquareVision.isLight(v.question.square);
+        const name = actual ? 'claire' : 'foncée';
+        this._judgeVision(
+            v,
+            light === actual,
+            `${light === actual ? 'Exact' : 'Non'} : ${sqName(v.question.square)} est une case ${name}.`,
+        );
+    }
+
+    tapVision(sqIdx) {
+        const v = this.vision;
+        if (!v || v.answered || v.question.kind !== VisionKind.TOUCH) return;
+        const target = v.question.square;
+        this._judgeVision(
+            v,
+            sqIdx === target,
+            sqIdx === target
+                ? `Bien vu : c'est la case ${sqName(target)}.`
+                : `Vous avez touché la case ${sqName(sqIdx)}. La case ${sqName(target)} est marquée en vert.`,
+            sqIdx,
+        );
+    }
+
+    answerKnight(jumps) {
+        const v = this.vision;
+        if (!v || v.answered || v.question.kind !== VisionKind.KNIGHT) return;
+        const n = SquareVision.knightDistance(v.question.square, v.question.target);
+        this._judgeVision(
+            v,
+            jumps === n,
+            `${jumps === n ? 'Exact : ' : 'Non : il faut '}${n} saut${n > 1 ? 's' : ''} pour aller de ${sqName(v.question.square)} à ${sqName(v.question.target)}.`,
+        );
+    }
+
+    _renderVisionBoard() {
+        const v = this.vision;
+        if (!v || !this.visionBoard || !this._palette) return;
+        const q = v.question;
+        const masked = q.kind === VisionKind.COLOR && !v.answered;
+        this.visionMask.classList.toggle('hidden', !masked);
+        this.visionBoard.el.classList.toggle('hidden', masked);
+        if (masked) {
+            this.visionMaskText.textContent = `Échiquier masqué : représentez-vous la case ${sqName(q.square)}.`;
+            return;
+        }
+        const c = this._palette;
+        let marks = [];
+        if (q.kind === VisionKind.KNIGHT) {
+            marks = [[q.target, c.gold]];
+        } else if (q.kind === VisionKind.TOUCH && v.answered) {
+            marks = [[q.square, c.green]];
+            if (v.tapped >= 0 && v.tapped !== q.square) marks.push([v.tapped, c.red]);
+        } else if (q.kind === VisionKind.COLOR) {
+            marks = [[q.square, c.gold]];
+        }
+        const tapEnabled = q.kind === VisionKind.TOUCH && !v.answered;
+        this.visionBoard.setState({
+            position: SquareVision.positionFor(q),
+            flipped: false,
+            interactive: false,
+            lastMove: null,
+            anim: null,
+            arrows: [],
+            marks,
+            badges: [],
+            kid: false,
+            showCoords: this._showCoords,
+            palette: c,
+            onSquareTap: tapEnabled ? (sqIdx) => this.tapVision(sqIdx) : null,
+        });
+    }
+
+    _renderVision() {
+        const v = this.vision;
+        if (!v || !this.visionLayout) return;
+        const q = v.question;
+        this.visionCard.update({
+            text: v.message,
+            tone: v.tone,
+            title: `${q.kind.label} · ${v.score} sur ${v.total}`,
+        });
+        this.visionBtns.replaceChildren();
+        if (v.answered) {
+            this.visionBtns.appendChild(duckButton({
+                label: 'Question suivante',
+                icon: 'ArrowForward',
+                accent: 'green',
+                filled: true,
+                className: 'flex-1',
+                onClick: () => this.nextVision(),
+            }));
+        } else if (q.kind === VisionKind.COLOR) {
+            this.visionBtns.append(
+                duckButton({
+                    label: 'Claire',
+                    accent: 'gold',
+                    filled: true,
+                    className: 'flex-1',
+                    ariaLabel: 'Case claire',
+                    onClick: () => this.answerColor(true),
+                }),
+                duckButton({
+                    label: 'Foncée',
+                    accent: 'blue',
+                    filled: true,
+                    className: 'flex-1',
+                    ariaLabel: 'Case foncée',
+                    onClick: () => this.answerColor(false),
+                }),
+            );
+        } else if (q.kind === VisionKind.KNIGHT) {
+            for (let n = 1; n <= 4; n++) {
+                this.visionBtns.appendChild(duckButton({
+                    label: String(n),
+                    accent: 'blue',
+                    className: 'flex-1',
+                    ariaLabel: `${n} saut${n > 1 ? 's' : ''}`,
+                    onClick: () => this.answerKnight(n),
+                }));
+            }
+        }
+        this.visionLayout.relayout();
+        this._renderVisionBoard();
+        this.visionBoard?._syncCanvasSize();
+        this.visionBoard?.draw();
     }
 }

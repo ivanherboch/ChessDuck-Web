@@ -36,8 +36,9 @@ export function annotationColor(a) {
 }
 
 export class PlayFeature {
-    constructor(engine) {
+    constructor(engine, { onTrainTopic = null } = {}) {
         this.engine = engine;
+        this.onTrainTopic = onTrainTopic;
         this.analyzer = new GameAnalysisService(engine, db);
         this.el = el('div', 'feature-root');
 
@@ -319,6 +320,52 @@ export class PlayFeature {
         }
     }
 
+    /**
+     * « Jouer cette position » (Académie) : partie contre l'Ordinateur depuis [fen].
+     * Enregistrée avec sa position de départ, sans changer l'ELO.
+     */
+    startFromPosition(fen, playerWhite) {
+        let start;
+        try {
+            start = new Line(fen);
+        } catch {
+            return;
+        }
+        if (this.review) this.closeReview();
+        const st = prefs.current;
+        this._gameGeneration++;
+        this._aiAbort?.abort();
+        this._aiAbort = null;
+        if (this._aiTimer) { clearTimeout(this._aiTimer); this._aiTimer = null; }
+        this._precomputeAbort?.abort();
+        this._precomputeAbort = null;
+        this._stuck = null;
+
+        this.state = {
+            line: start,
+            cursor: 0,
+            playerWhite: Boolean(playerWhite),
+            twoPlayers: false,
+            aiElo: st.aiElo,
+            flipped: !playerWhite,
+            anim: null,
+            thinking: false,
+            result: null,
+            hintStage: 0,
+            analysis: new Map(),
+            evalOn: this.state.evalOn,
+            lastRecord: null,
+        };
+        this.liveLayout.resetReserve();
+        this._renderLive();
+
+        if (start.last.whiteToMove !== Boolean(playerWhite)) {
+            this._aiMove();
+        } else {
+            this._precompute();
+        }
+    }
+
     flip() {
         this.state.flipped = !this.state.flipped;
         this._renderLive();
@@ -518,7 +565,8 @@ export class PlayFeature {
         const reason = resignedWhite !== null && resignedWhite !== undefined ? 'abandon' : GameLogic.endText(end);
         const resultStr = whiteResult === 1 ? '1-0' : (whiteResult === -1 ? '0-1' : '1/2-1/2');
 
-        if (line.size < 2) {
+        const fromPosition = line.startFen !== START_FEN;
+        if (line.size < (fromPosition ? 1 : 2)) {
             s.result = {
                 text: "Partie interrompue avant le premier échange : rien n'est enregistré.",
                 tone: Tone.NEUTRAL,
@@ -558,6 +606,7 @@ export class PlayFeature {
                 whiteName: st.pseudo,
                 blackName: st.pseudo2,
                 opponentElo: 1200,
+                startFen: fromPosition ? line.startFen : '',
             };
             const id = await db.insertGame(record);
             record.id = id;
@@ -568,17 +617,20 @@ export class PlayFeature {
             this.analyzer.start(record, line);
         } else {
             const outcome = s.playerWhite ? whiteResult : -whiteResult;
-            const newElo = GameLogic.newElo(st.elo, s.aiElo, (outcome + 1) / 2.0);
+            const newElo = fromPosition ? st.elo : GameLogic.newElo(st.elo, s.aiElo, (outcome + 1) / 2.0);
             const diff = newElo - st.elo;
             const delta = diff >= 0 ? `+${diff}` : `−${-diff}`;
             const head = outcome === 1 ? `Victoire par ${reason} !` : (outcome === -1 ? `Défaite par ${reason}.` : `Partie nulle (${reason}).`);
             const tone = outcome === 1 ? Tone.GOOD : (outcome === 0 ? Tone.GOLD : Tone.BAD);
             if (gen === this._gameGeneration && !this._destroyed) {
                 s.thinking = false;
-                s.result = { text: `${head} ELO ${st.elo} → ${newElo} (${delta}).`, tone };
+                const resultText = fromPosition
+                    ? `${head} Partie d'entraînement depuis une leçon : l'ELO ne change pas.`
+                    : `${head} ELO ${st.elo} → ${newElo} (${delta}).`;
+                s.result = { text: resultText, tone };
                 this._renderLive();
             }
-            prefs.setElo(newElo);
+            if (!fromPosition) prefs.setElo(newElo);
             const record = {
                 date: Date.now(),
                 opponent: `Ordinateur ${s.aiElo}`,
@@ -594,6 +646,7 @@ export class PlayFeature {
                 whiteName: s.playerWhite ? st.pseudo : COMPUTER,
                 blackName: s.playerWhite ? COMPUTER : st.pseudo,
                 opponentElo: s.aiElo,
+                startFen: fromPosition ? line.startFen : '',
             };
             const id = await db.insertGame(record);
             record.id = id;
@@ -902,7 +955,7 @@ export class PlayFeature {
         this._revPlayback.cancel();
         let line;
         try {
-            line = Line.fromUci(START_FEN, g.moves || '');
+            line = Line.fromUci(g.startFen || START_FEN, g.moves || '');
         } catch {
             return;
         }
@@ -1247,7 +1300,15 @@ export class PlayFeature {
             const text = cmt.text + (cur === line.size ? ' ' + ReviewComments.ending(g) : '');
             const note = notes[cur - 1];
             const title = stepTitle(line, cur, { note });
-            this.revFeedback.update({ text, tone: cmt.tone, title });
+            const topic = this.onTrainTopic ? ReviewComments.topic(g, line, cur - 1, r.analysis) : null;
+            const actionEl = topic ? duckButton({
+                label: "Travailler ce point dans l'Académie",
+                icon: 'School',
+                accent: 'green',
+                className: 'full-w',
+                onClick: () => this.onTrainTopic(topic),
+            }) : null;
+            this.revFeedback.update({ text, tone: cmt.tone, title, actionEl });
             this.revFeedback.el.classList.toggle('is-wide-review', wide);
         }
 

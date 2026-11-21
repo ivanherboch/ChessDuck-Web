@@ -4,6 +4,7 @@ import {
 import { PieceLexiconFr } from '../core/piece-fr.js';
 import { mateFor, winPercent } from '../core/stockfish.js';
 import { GameLogic } from './game-logic.js';
+import { ReviewTopic } from './weak-topics.js';
 
 const Tone = Object.freeze({
     INFO: 'info',
@@ -76,8 +77,8 @@ function describe(v, p, m, san, prev) {
     return `${v.label} ${base}${tail}`;
 }
 
-/** Pourquoi le coup joué est fautif : la première explication concrète qui s'applique. */
-function explain(v, p, m, san, a0, a1) {
+/** Explication d'une faute et, s'il y a lieu, le point faible qu'elle révèle (pont vers l'Académie). */
+function diagnose(v, p, m, san, a0, a1) {
     const after = p.play(m);
     const replyCand = a1.best ? Move.fromUci(a1.best) : null;
     const reply = replyCand && after.isLegal(replyCand) ? replyCand : null;
@@ -87,10 +88,10 @@ function explain(v, p, m, san, a0, a1) {
     // 1. Le coup autorise un mat rapide.
     const oppMate = mateFor(a1.eval, !p.whiteToMove);
     if (oppMate !== null && reply) {
-        if (oppMate <= 2) {
-            return `en jouant ${san}, ${v.f('vous permettez', 'il permet')} à l'adversaire de faire échec et mat en ${oppMate} (${after.san(reply)}).`;
-        }
-        return `${san} laisse l'adversaire lancer une attaque décisive contre ${v.f('votre', 'son')} roi.`;
+        const text = oppMate <= 2
+            ? `en jouant ${san}, ${v.f('vous permettez', 'il permet')} à l'adversaire de faire échec et mat en ${oppMate} (${after.san(reply)}).`
+            : `${san} laisse l'adversaire lancer une attaque décisive contre ${v.f('votre', 'son')} roi.`;
+        return [text, ReviewTopic.ALLOWED_MATE];
     }
     // 2. Une pièce est laissée en prise.
     if (reply && after.isCapture(reply)) {
@@ -98,9 +99,10 @@ function explain(v, p, m, san, a0, a1) {
         const gained = p.isCapture(m) ? PIECE_VALUES[p.capturedType(m)] : 0;
         if (PIECE_VALUES[victim] > gained) {
             const rs = after.san(reply);
-            return reply.to === m.to
+            const text = reply.to === m.to
                 ? `en jouant ${san}, ${v.f('vous exposez', 'il expose')} ${poss(v, victim)} : ${rs} peut ${it(victim)} capturer.`
                 : `${san} laisse ${poss(v, victim)} en ${sqName(reply.to)} sans protection suffisante : ${rs} ${it(victim)} capture.`;
+            return [text, ReviewTopic.HANGING_PIECE];
         }
     }
     if (best) {
@@ -111,32 +113,37 @@ function explain(v, p, m, san, a0, a1) {
             const victim = p.capturedType(best);
             const free = p.attackers(best.to, !p.whiteToMove).length === 0;
             if (free || PIECE_VALUES[victim] >= PIECE_VALUES[bt]) {
-                return `${v.f('vous avez', 'il a')} manqué l'occasion de capturer ${the(victim)} en ${sqName(best.to)} avec ${bs} : cela ${v.f('vous ', 'lui ')}aurait donné l'avantage.`;
+                return [`${v.f('vous avez', 'il a')} manqué l'occasion de capturer ${the(victim)} en ${sqName(best.to)} avec ${bs} : cela ${v.f('vous ', 'lui ')}aurait donné l'avantage.`, ReviewTopic.MISSED_CAPTURE];
             }
         }
         // 4. Une pièce attaquée n'a pas été mise à l'abri.
         if (attackedCheaply(p, best.from) && bt !== PAWN && bt !== KING && best.from !== m.from) {
-            return `${poss(v, bt)} en ${sqName(best.from)} était attaqué${PieceLexiconFr.isFeminine(bt) ? 'e' : ''} : il fallait ${it(bt)} mettre à l'abri avec ${bs}.`;
+            return [`${poss(v, bt)} en ${sqName(best.from)} était attaqué${PieceLexiconFr.isFeminine(bt) ? 'e' : ''} : il fallait ${it(bt)} mettre à l'abri avec ${bs}.`, ReviewTopic.HANGING_PIECE];
         }
         // 5. Un échec fort a été manqué.
         if (bs.endsWith('+')) {
-            return `${v.f('vous auriez dû', 'il aurait dû')} donner échec avec ${bs} pour garder l'initiative.`;
+            return [`${v.f('vous auriez dû', 'il aurait dû')} donner échec avec ${bs} pour garder l'initiative.`, null];
         }
         // 6. Principes d'ouverture.
         if (p.isCastle(best)) {
-            return `${v.f('vous auriez dû', 'il aurait dû')} mettre ${v.f('votre', 'son')} roi à l'abri en roquant (${bs}).`;
+            return [`${v.f('vous auriez dû', 'il aurait dû')} mettre ${v.f('votre', 'son')} roi à l'abri en roquant (${bs}).`, ReviewTopic.CASTLING];
         }
         if (p.fullmove <= 14) {
             if ((bt === KNIGHT || bt === BISHOP) && rankOf(best.from) === (p.whiteToMove ? 0 : 7)) {
-                return `${v.f('vous auriez dû', 'il aurait dû')} développer ${poss(v, bt)} avec ${bs} pour prendre part à la bataille du centre.`;
+                return [`${v.f('vous auriez dû', 'il aurait dû')} développer ${poss(v, bt)} avec ${bs} pour prendre part à la bataille du centre.`, ReviewTopic.DEVELOPMENT];
             }
             if (bt === PAWN && fileOf(best.to) >= 3 && fileOf(best.to) <= 4 && rankOf(best.to) >= 2 && rankOf(best.to) <= 5) {
-                return `${v.f('vous auriez dû', 'il aurait dû')} occuper le centre avec ${bs}.`;
+                return [`${v.f('vous auriez dû', 'il aurait dû')} occuper le centre avec ${bs}.`, ReviewTopic.DEVELOPMENT];
             }
         }
-        return `${bs} était plus fort que ${san}.`;
+        return [`${bs} était plus fort que ${san}.`, null];
     }
-    return `${san} affaiblit ${v.f('votre', 'sa')} position.`;
+    return [`${san} affaiblit ${v.f('votre', 'sa')} position.`, null];
+}
+
+/** Pourquoi le coup joué est fautif : la première explication concrète qui s'applique. */
+function explain(v, p, m, san, a0, a1) {
+    return diagnose(v, p, m, san, a0, a1)[0];
 }
 
 export const ReviewComments = {
@@ -149,6 +156,27 @@ export const ReviewComments = {
         else if (g.vsComputer) name = 'Joueur';
         else name = white ? 'Joueur 1' : 'Joueur 2';
         return new Voice(name, human, white);
+    },
+
+    /**
+     * Point faible révélé par le coup n° i (indice 0), seulement pour un joueur humain et une faute nette :
+     * mat manqué, gaffe, erreur ou imprécision dont l'explication relève d'un thème de l'Académie.
+     */
+    topic(g, line, i, analysis) {
+        if (i < 0 || i >= line.size) return null;
+        const p = line.positions[i];
+        const v = this.voice(g, p.whiteToMove);
+        if (!v.human) return null;
+        const a0 = analysis?.[i];
+        const a1 = analysis?.[i + 1];
+        if (!a0 || !a1) return null;
+        const m = line.moves[i];
+        const san = line.sans[i];
+        if (san.endsWith('#')) return null;
+        if (GameLogic.missedMate(p.whiteToMove, a0, a1) !== null) return ReviewTopic.MISSED_MATE;
+        const note = GameLogic.annotate(p, m, a0, a1, i > 0 ? line.moves[i - 1] : null);
+        if (note !== '??' && note !== '?' && note !== '?!') return null;
+        return diagnose(v, p, m, san, a0, a1)[1];
     },
 
     /**

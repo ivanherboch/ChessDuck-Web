@@ -175,9 +175,9 @@ test('NotationLogic: levels, pick, diagnose, hint, explain', () => {
     assert.equal(/stockfish/i.test(NotationLogic.explain(mateEx)), false);
 });
 
-test('Lessons asset: all 113 lessons in assets/lessons.json validate cleanly', () => {
+test('Lessons asset: all 211 lessons in assets/lessons.json validate cleanly', () => {
     const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/lessons.json'), 'utf8'));
-    assert.equal(raw.length, 113);
+    assert.equal(raw.length, 211);
     const lessons = Lessons.initFromData(raw);
     const ids = new Set();
     for (const l of lessons) {
@@ -1263,15 +1263,15 @@ test('v2.4.6..v2.4.7: kidNarration pref, version bump & Settings UI coherence', 
     assert.match(settingsSrc, /Voix en mode enfant/);
 });
 
-test('v2.5.2: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
+test('v3.2.5: version bump & compact accessible Notation FIDE keyboard dimensions', async () => {
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const settingsSrc = fs.readFileSync(path.join(ROOT, 'src/features/settings-sheet.js'), 'utf8');
     const cssSrc = fs.readFileSync(path.join(ROOT, 'css/styles.css'), 'utf8');
     const notationSrc = fs.readFileSync(path.join(ROOT, 'src/features/notation.js'), 'utf8');
 
-    assert.match(swSrc, /chessduck-v2\.5\.2-/);
-    assert.match(settingsSrc, /v2\.5\.2/);
-    assert.match(cssSrc, /v2\.5\.2/);
+    assert.match(swSrc, /chessduck-v3\.2\.5-/);
+    assert.match(settingsSrc, /v3\.2\.5/);
+    assert.match(cssSrc, /v3\.2\.5/);
     assert.match(notationSrc, /bottomMin:\s*244/);
 
     assert.match(cssSrc, /\.notation-input-box\s*\{[^}]*height:\s*40px/);
@@ -2297,3 +2297,254 @@ test('v2.5.2: ShareCard check glow on problems & solution steps, capture "x" bad
     }
 });
 
+
+test('v2.6.0-v3.2.5: all 211 lessons metadata, variants, stepVisuals, quiz, drill & SpokenFr coverage', async () => {
+    const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/lessons.json'), 'utf8'));
+    const lessons = Lessons.initFromData(raw);
+    assert.equal(lessons.length, 211);
+    assert.deepEqual(Lessons.categories, [
+        LessonCategory.BASICS,
+        LessonCategory.OPENING,
+        LessonCategory.MIDDLEGAME,
+        LessonCategory.STRATEGY,
+        LessonCategory.ENDGAME,
+        LessonCategory.MODEL_GAMES,
+    ]);
+    assert.equal(Lessons.number(115), 1);
+
+    const { EndgameFamily } = await import('../src/features/endgame-practice.js');
+    const { SpokenFr } = await import('../src/core/spoken-fr.js');
+
+    let modelCount = 0;
+    for (const l of lessons) {
+        assert.ok(l.level >= 1 && l.level <= 5, `Bad level in lesson ${l.id}`);
+        assert.ok(l.takeaway.length > 0, `Missing takeaway in lesson ${l.id}`);
+        if (l.kind === 'MODEL_GAME') modelCount++;
+        for (const pStep of l.pauseSteps) {
+            assert.ok(pStep >= 0 && pStep < l.line.size, `pauseStep out of range in ${l.id}`);
+        }
+        for (const [k, vis] of l.stepVisuals) {
+            assert.ok(k >= 0 && k <= l.line.size, `stepVisuals key out of range in ${l.id}`);
+            for (const q of vis.marks) assert.ok(q >= 0 && q < 64);
+            for (const [f, t] of vis.arrows) assert.ok(f >= 0 && f < 64 && t >= 0 && t < 64);
+        }
+        if (l.drill) assert.ok(EndgameFamily.of(l.drill), `Unknown drill ${l.drill} in lesson ${l.id}`);
+        if (l.quiz) {
+            assert.ok(l.quiz.question && l.quiz.answer && l.quiz.explanation);
+            assert.ok(l.quiz.wrong.length >= 1);
+        }
+        for (let vi = 1; vi <= l.variants.length; vi++) {
+            const vl = l.lineFor(vi);
+            const vt = l.textsFor(vi);
+            assert.equal(vt.length, vl.size, `Variant ${vi} length mismatch in ${l.id}`);
+        }
+        for (const str of [l.summary, l.takeaway, ...l.ideas, ...l.traps]) {
+            assert.equal(/stockfish/i.test(str), false, `Stockfish mention in lesson ${l.id}`);
+            assert.ok(SpokenFr.text(str).length > 0);
+        }
+    }
+    assert.equal(modelCount, 8);
+    // Pronunciation lexicon checks for newly added terms
+    assert.match(SpokenFr.text('Début Réti et Philidor contre Vancura.'), /Rétti/);
+    assert.match(SpokenFr.text('Capablanca joue le desperado.'), /Capablannca/);
+    assert.match(SpokenFr.text('La défense Nimzo-indienne.'), /Nimmzo-indienne/);
+});
+
+test('v2.6.0-v3.2.5: MoveJudge compare, MultiPV judge, loss & RefutationLogic', async () => {
+    const { MoveJudge, Verdict } = await import('../src/features/move-judge.js');
+    const { RefutationLogic } = await import('../src/features/refutation.js');
+    const { MATE } = await import('../src/core/stockfish.js');
+
+    // Pure compare checks
+    assert.equal(MoveJudge.compare(MATE - 2, MATE - 2, false), Verdict.EQUIVALENT);
+    assert.equal(MoveJudge.compare(MATE - 2, MATE - 4, false), Verdict.EQUIVALENT);
+    assert.equal(MoveJudge.compare(MATE - 6, MATE - 2, false), Verdict.SLOWER);
+    assert.equal(MoveJudge.compare(500, MATE - 2, false), Verdict.WORSE);
+    assert.equal(MoveJudge.compare(20, 20, false), Verdict.EQUIVALENT);
+    assert.equal(MoveJudge.compare(-300, 100, false), Verdict.WORSE);
+    assert.equal(MoveJudge.compare(650, 900, true), Verdict.EQUIVALENT);
+    assert.equal(MoveJudge.compare(450, 900, true), Verdict.WORSE);
+    assert.equal(MoveJudge.compare(100, 900, true), Verdict.WORSE);
+
+    // Mock engine MultiPV judge + loss
+    const pos = Position.fromFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    const e4 = Move.fromUci('e2e4');
+    const d4 = Move.fromUci('d2d4');
+    const a3 = Move.fromUci('a2a3');
+    const mockEngine = {
+        async search(fen, ms, opts) {
+            if (opts?.multiPv === 4) {
+                return {
+                    best: e4,
+                    score: 30,
+                    lines: [
+                        { move: e4, score: 30 },
+                        { move: d4, score: 25 },
+                        { move: a3, score: -180 },
+                    ],
+                };
+            }
+            return { best: Move.fromUci('e7e5'), score: 190 };
+        },
+    };
+    const judge = new MoveJudge(mockEngine, 100);
+    assert.equal(await judge.judge(pos, e4, e4, false), Verdict.EXACT);
+    assert.equal(await judge.judge(pos, d4, e4, false), Verdict.EQUIVALENT);
+    assert.equal(await judge.judge(pos, a3, e4, false), Verdict.WORSE);
+    const lGood = await judge.loss(pos, d4, e4);
+    assert.ok(lGood !== null && lGood < 2.0);
+
+    // RefutationLogic checkmate, stalemate, and engine capture reply
+    const matePos = Position.fromFen('6k1/5ppp/8/8/8/8/5Q2/4R1K1 w - - 0 1');
+    const mateRes = await RefutationLogic.reply(mockEngine, matePos, Move.fromUci('e1e8'), { minShow: 0 });
+    assert.equal(mateRes.reply, null);
+    assert.match(mateRes.text, /échec et mat/);
+
+    const stalePos = Position.fromFen('7k/5K2/8/8/8/8/8/6Q1 w - - 0 1');
+    const staleRes = await RefutationLogic.reply(mockEngine, stalePos, Move.fromUci('g1g6'), { minShow: 0 });
+    assert.equal(staleRes.reply, null);
+    assert.match(staleRes.text, /pat/);
+
+    const capRes = await RefutationLogic.reply(mockEngine, matePos, Move.fromUci('f2f7'), { minShow: 0 });
+    assert.equal(capRes.reply?.uci, 'g8f7');
+    assert.match(capRes.text, /capturent votre dame/);
+});
+
+test('v2.7.0-v3.2.5: SrsScheduler, AcademyAssessments, EndgamePositions, ReflexDrills & SquareVision', async () => {
+    const { SrsScheduler, DAY } = await import('../src/features/srs-scheduler.js');
+    const { AcademyAssessments } = await import('../src/features/academy-assessments.js');
+    const { ENDGAME_FAMILIES, EndgamePositions } = await import('../src/features/endgame-practice.js');
+    const { ReflexDrills } = await import('../src/features/reflex-drills.js');
+    const { SquareVision, VisionKind } = await import('../src/features/square-vision.js');
+
+    // SrsScheduler
+    let now = 1_700_000_000_000;
+    const srs = new SrsScheduler(() => now);
+    const p0 = srs.mastered({ lessonId: 1, masteredAt: now, srsStage: 0, nextReviewAt: 0, lastReviewedAt: 0 });
+    assert.equal(p0.srsStage, 1);
+    assert.equal(p0.nextReviewAt, now + DAY);
+    assert.equal(srs.daysUntil(p0), 1);
+    assert.equal(srs.isDue(p0), false);
+    now += DAY + 1000;
+    assert.equal(srs.isDue(p0), true);
+    assert.deepEqual(srs.due([p0]), [1]);
+    const p1 = srs.reviewed(p0, true);
+    assert.equal(p1.srsStage, 2);
+    assert.equal(srs.daysUntil(p1), 7);
+    const pFail = srs.reviewed(p1, false);
+    assert.equal(pFail.srsStage, 1);
+    assert.equal(srs.daysUntil(pFail), 1);
+
+    const sampleLessons = Lessons.all;
+    const recL2 = srs.recommended(sampleLessons, new Map(), 2);
+    assert.ok(recL2 && recL2.level === 2, 'Level 2 recommended lesson skips Level 1 basics');
+
+    // AcademyAssessments
+    assert.equal(AcademyAssessments.placementSpecs().length, 12);
+    assert.equal(AcademyAssessments.placementLevel([true, true, false, true, true, true, false, true, false, false, false, false]), 3);
+    assert.equal(AcademyAssessments.placementLevel([false, false, false, true, true, true, true, true, true, true, true, true]), 1);
+    const ex = AcademyAssessments.examSpecs(3, () => 0.5);
+    assert.equal(ex.length, 10);
+    assert.equal(AcademyAssessments.examPassed(8), true);
+    assert.equal(AcademyAssessments.examPassed(7), false);
+
+    // EndgamePositions across all 11 families
+    let seed = 42;
+    const seededRnd = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+    };
+    assert.equal(ENDGAME_FAMILIES.length, 11);
+    for (const fam of ENDGAME_FAMILIES) {
+        const p = EndgamePositions.generate(fam, seededRnd);
+        assert.equal(p.inCheck, false, `Endgame ${fam.name} generated in check`);
+        assert.equal(p.whiteToMove, fam.heroWhite, `Endgame ${fam.name} side to move mismatch`);
+        assert.ok(p.legalMoves.length > 0, `Endgame ${fam.name} has no legal moves`);
+    }
+
+    // ReflexDrills
+    const forkPuzzle = {
+        fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 0 1',
+        moves: 'h5f7 e8d8 f7f6 d8e7',
+    };
+    assert.ok(ReflexDrills.blindFrom(forkPuzzle));
+    assert.match(ReflexDrills.announcedText(ReflexDrills.blindFrom(forkPuzzle)), /Kxd8.*Qxf6\+/);
+
+    // SquareVision
+    assert.equal(SquareVision.isLight(0), false); // a1 dark
+    assert.equal(SquareVision.isLight(7), true);  // h1 light
+    assert.equal(SquareVision.isLight(1), true);  // b1 light
+    assert.equal(SquareVision.knightDistance(0, 0), 0);
+    assert.equal(SquareVision.knightDistance(0, 17), 1); // a1 -> b3
+    const kq = SquareVision.question(seededRnd, VisionKind.KNIGHT);
+    const dist = SquareVision.knightDistance(kq.square, kq.target);
+    assert.ok(dist >= 1 && dist <= 4);
+    assert.match(SquareVision.prompt({ kind: VisionKind.COLOR, square: 28, target: -1 }), /e4/);
+});
+
+test('v3.0.0-v3.2.5: WeakTopics, ReviewComments.topic, Prefs, IDB migration & sw precache completeness', async () => {
+    const { WeakTopics, ReviewTopic } = await import('../src/features/weak-topics.js');
+    const { ReviewComments } = await import('../src/features/review-comments.js');
+    const { Analysis } = await import('../src/features/game-logic.js');
+    const { MATE } = await import('../src/core/stockfish.js');
+    const { START_FEN } = await import('../src/core/chess.js');
+    const { normalizeLessonProgress } = await import('../src/data/db.js');
+    const { prefs } = await import('../src/data/prefs.js');
+
+    // Legacy v1 mastered row gets 3 stars
+    const legacy = normalizeLessonProgress({ lessonId: 5, masteredAt: 123456 });
+    assert.equal(legacy.stars, 3);
+    assert.equal(legacy.srsStage, 0);
+
+    // Prefs academyLevel range acceptance & sanitization
+    const origLv = prefs.current.academyLevel;
+    const origPl = prefs.current.placementDone;
+    prefs.setAcademyLevel(5);
+    assert.equal(prefs.current.academyLevel, 5);
+    prefs.setAcademyLevel(1);
+    assert.equal(prefs.current.academyLevel, 1);
+    prefs.setAcademyLevel(99);
+    assert.equal(prefs.current.academyLevel, 2);
+    prefs.setPlacementDone(true);
+    assert.equal(prefs.current.placementDone, true);
+    prefs.setAcademyLevel(origLv);
+    prefs.setPlacementDone(origPl);
+
+    // ReviewComments.topic & WeakTopics
+    const g = {
+        vsComputer: true,
+        playerWhite: true,
+        whiteName: 'Alice',
+        blackName: 'Ordinateur',
+        date: 1000,
+        moves: 'e2e4 e7e5 d1h5 g8f6 h5e5 f8e7',
+        startFen: '',
+        analysis: '',
+    };
+    const line = Line.fromUci(START_FEN, g.moves);
+    const an = new Array(line.size + 1).fill(null);
+    an[4] = new Analysis(MATE - 2, 'h5f7');
+    an[5] = new Analysis(150, 'f8e7');
+    const t = ReviewComments.topic(g, line, 4, an);
+    assert.equal(t, ReviewTopic.MISSED_MATE);
+    g.analysis = Analysis.encodeAll(an);
+    const prios = WeakTopics.compute([g], [
+        { lessonId: 12, masteredAt: 0, stars: 1, errors: 3, practicePassed: 0, practiceTotal: 5 },
+    ]);
+    assert.ok(prios.length >= 1);
+
+    // Service Worker precaches EVERY .js module under src/
+    const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const walkJs = (dir) => {
+        const out = [];
+        for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+            const p = path.join(dir, ent.name);
+            if (ent.isDirectory()) out.push(...walkJs(p));
+            else if (ent.name.endsWith('.js')) out.push('./' + path.relative(ROOT, p).replace(/\\/g, '/'));
+        }
+        return out;
+    };
+    for (const rel of walkJs(path.join(ROOT, 'src'))) {
+        assert.ok(swSrc.includes(rel), `Missing from sw.js PRECACHE_URLS: ${rel}`);
+    }
+});
